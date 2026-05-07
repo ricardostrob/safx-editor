@@ -1,0 +1,91 @@
+# SAFX Editor — .gitignore
+# Adejo Tecnologia / TecTex
+
+# ── Python ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+*.dylib
+
+# Compilado/criptografado
+*.pyc
+*.pyx.in
+*.pxd
+
+# ── Ambientes virtuais ───────────────────────────────
+venv/
+.venv/
+env/
+.env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Segurança — NUNCA commitar ───────────────────────
+.keystore
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+
+# ── Config local (contém senhas) ─────────────────────
+# O config.json do usuário fica em ~/.safx_editor/ (fora do repo)
+# Não commitar configs locais de teste
+**/config.local.json
+**/.safx_editor/
+
+# ── Logs ─────────────────────────────────────────────
+*.log
+logs/
+*.tmp
+*.bak
+
+# ── Build / Dist ─────────────────────────────────────
+build/
+dist_pyinstaller/
+*.spec.bak
+*.egg-info/
+.eggs/
+
+# ── IDEs ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+.vs/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── Dados SAFX (nunca commitar dados reais) ──────────
+LANXESS_AJUSTES/
+*.txt.bak
+SAFXs/
+
+# ── Banco externo local ───────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Atalhos Windows ──────────────────────────────────
+*.lnk
+
+# ── Arquivos de patch / diff ─────────────────────────
+*.orig
+*.rej
+*.patch
