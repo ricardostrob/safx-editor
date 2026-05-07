@@ -1108,7 +1108,7 @@ class SettingsDialog(QDialog):
         self.cfg.set_value('ext_db', 'enabled', checked)
 
     def _load_ext_db_settings(self):
-        cfg = self.cfg.get_value('ext_db', default={})
+        cfg = self.cfg.get_section('ext_db')
         if isinstance(cfg, dict):
             self.edit_ext_host.setText(cfg.get('host', ''))
             self.spin_ext_port.setValue(cfg.get('port', 5432))

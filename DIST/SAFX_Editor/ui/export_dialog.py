@@ -507,189 +507,269 @@ class ExportDialog(QDialog):
         # ── Separador ──
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color:#313244; margin:0;")
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(
+            f"color:{'#313244' if self._is_dark else '#c8cbd8'}; margin:0 -14px;")
         top_lay.addWidget(sep)
+
+        # ── Paleta de cores para a seção de campos (tema-aware) ──────────────
+        if self._is_dark:
+            F_HDR_BG     = "#181825"
+            F_HDR_TXT    = "#89b4fa"
+            F_HINT_TXT   = "#6c7086"
+            F_SRCH_BG    = "#26263a"
+            F_SRCH_TXT   = "#cdd6f4"
+            F_SRCH_BD    = "#45475a"
+            F_SRCH_FOC   = "#89b4fa"
+            F_LIST_BG    = "#13131f"
+            F_LIST_BD    = "#313244"
+            F_LIST_HVR   = "#26263a"
+            F_LIST_SEL   = "#1e3a5a"
+            F_LIST_SELTX = "#89b4fa"
+            KEY_HDR_BG   = "#2a1a3e"
+            KEY_HDR_TXT  = "#cba6f7"
+            KEY_LIST_BD  = "#3a1a5e"
+            KEY_LIST_HVR = "#2a1a3e"
+            KEY_LIST_SEL = "#3a1a5e"
+            KEY_LIST_SELTX = "#cba6f7"
+            CHG_HDR_BG   = "#1a2e1a"
+            CHG_HDR_TXT  = "#a6e3a1"
+            CHG_LIST_BD  = "#1a4e1a"
+            CHG_LIST_HVR = "#1a2e1a"
+            CHG_LIST_SEL = "#1a4e1a"
+            CHG_LIST_SELTX = "#a6e3a1"
+            ARR_KEY_BG   = "#2a1a3e"; ARR_KEY_FG   = "#cba6f7"
+            ARR_CHG_BG   = "#1a2e1a"; ARR_CHG_FG   = "#a6e3a1"
+            ARR_REM_BG   = "#2a1a1a"; ARR_REM_FG   = "#f38ba8"
+            ARR_RST_BG   = "#252535"; ARR_RST_FG   = "#6c7086"
+            SPTR_HANDLE  = "#26263a"; SPTR_HOVER   = "#1e3a5a"
+            SPTR_BORDER  = "#45475a"
+        else:
+            F_HDR_BG     = "#dde1ea"
+            F_HDR_TXT    = "#1a5ab4"
+            F_HINT_TXT   = "#707090"
+            F_SRCH_BG    = "#ffffff"
+            F_SRCH_TXT   = "#1a1a2e"
+            F_SRCH_BD    = "#b8bcd0"
+            F_SRCH_FOC   = "#4a90d9"
+            F_LIST_BG    = "#ffffff"
+            F_LIST_BD    = "#b8bcd0"
+            F_LIST_HVR   = "#e8f0fa"
+            F_LIST_SEL   = "#4a90d9"
+            F_LIST_SELTX = "#ffffff"
+            KEY_HDR_BG   = "#e8d8f8"
+            KEY_HDR_TXT  = "#5a1a8e"
+            KEY_LIST_BD  = "#c8a8e8"
+            KEY_LIST_HVR = "#f0e8fc"
+            KEY_LIST_SEL = "#8a4ab4"
+            KEY_LIST_SELTX = "#ffffff"
+            CHG_HDR_BG   = "#c8f0d8"
+            CHG_HDR_TXT  = "#1a6030"
+            CHG_LIST_BD  = "#88d0a8"
+            CHG_LIST_HVR = "#e8faf0"
+            CHG_LIST_SEL = "#2a8a4a"
+            CHG_LIST_SELTX = "#ffffff"
+            ARR_KEY_BG   = "#e8d8f8"; ARR_KEY_FG   = "#5a1a8e"
+            ARR_CHG_BG   = "#c8f0d8"; ARR_CHG_FG   = "#1a6030"
+            ARR_REM_BG   = "#fde8ec"; ARR_REM_FG   = "#b01030"
+            ARR_RST_BG   = "#e8eaf0"; ARR_RST_FG   = "#707090"
+            SPTR_HANDLE  = "#c8cbd8"; SPTR_HOVER   = "#4a90d9"
+            SPTR_BORDER  = "#b8bcd0"
 
         # ── Splitter horizontal: Disponíveis + Botões + [Chaves | Alterados] ──
         fields_splitter = QSplitter(Qt.Orientation.Horizontal)
-        fields_splitter.setHandleWidth(6)
+        fields_splitter.setHandleWidth(5)
         fields_splitter.setStyleSheet(
-            "QSplitter::handle:horizontal {"
-            "  background:#26263a; border-left:1px solid #45475a;"
-            "  border-right:1px solid #45475a;"
-            "}"
-            "QSplitter::handle:horizontal:hover { background:#1e3a5a; }")
+            f"QSplitter::handle:horizontal{{"
+            f"background:{SPTR_HANDLE};border-left:1px solid {SPTR_BORDER};"
+            f"border-right:1px solid {SPTR_BORDER};}}"
+            f"QSplitter::handle:horizontal:hover{{background:{SPTR_HOVER};}}")
 
-        # ── Coluna 1: Campos Disponíveis + busca ──
+        # ── Coluna 1: Campos Disponíveis + busca ─────────────────────────────
         avail_w = QWidget()
         avail_lay = QVBoxLayout(avail_w)
         avail_lay.setContentsMargins(0, 0, 0, 0)
-        avail_lay.setSpacing(4)
+        avail_lay.setSpacing(0)
 
         avail_header = QWidget()
         avail_header.setStyleSheet(
-            "background:#181825; border-radius:6px 6px 0 0; padding:4px;")
+            f"background:{F_HDR_BG}; border-radius:8px 8px 0 0;")
         avail_h = QVBoxLayout(avail_header)
-        avail_h.setContentsMargins(6, 6, 6, 4)
-        avail_h.setSpacing(4)
+        avail_h.setContentsMargins(10, 8, 10, 6)
+        avail_h.setSpacing(6)
 
         lbl_avail = QLabel("📋  Campos Disponíveis")
         lbl_avail.setStyleSheet(
-            "color:#89b4fa; font-size:12px; font-weight:700;")
+            f"color:{F_HDR_TXT}; font-size:12px; font-weight:700;"
+            "background:transparent;")
         avail_h.addWidget(lbl_avail)
 
-        # CAMPO DE BUSCA
         self.search_edit = QLineEdit()
-        self.search_edit.setFixedHeight(30)
-        self.search_edit.setPlaceholderText("🔍 Buscar campo...")
+        self.search_edit.setFixedHeight(32)
+        self.search_edit.setPlaceholderText("🔍  Buscar campo...")
         self.search_edit.setStyleSheet(
-            "QLineEdit {"
-            "  background:#26263a; color:#cdd6f4; border:1px solid #45475a;"
-            "  border-radius:5px; padding:2px 10px; font-size:12px;"
-            "}"
-            "QLineEdit:focus { border-color:#89b4fa; }")
+            f"QLineEdit{{background:{F_SRCH_BG};color:{F_SRCH_TXT};"
+            f"border:1px solid {F_SRCH_BD};border-radius:6px;"
+            f"padding:4px 10px;font-size:12px;}}"
+            f"QLineEdit:focus{{border-color:{F_SRCH_FOC};}}")
         self.search_edit.textChanged.connect(self._filter_available)
         avail_h.addWidget(self.search_edit)
 
-        lbl_hint = QLabel("Duplo clique → Chave  |  Selecione + botão → Alterado")
-        lbl_hint.setStyleSheet("color:#45475a; font-size:10px;")
+        lbl_hint = QLabel("2× clique → Chave   |   Selecione + botão → Alterado")
+        lbl_hint.setStyleSheet(
+            f"color:{F_HINT_TXT}; font-size:10px; background:transparent;")
         avail_h.addWidget(lbl_hint)
 
         avail_lay.addWidget(avail_header)
 
         self.list_avail = QListWidget()
-        self.list_avail.setMinimumWidth(200)
-        self.list_avail.setMinimumHeight(180)
+        self.list_avail.setMinimumWidth(180)
+        self.list_avail.setMinimumHeight(100)
         self.list_avail.setFont(QFont("Consolas", 11))
         self.list_avail.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_avail.itemDoubleClicked.connect(self._move_to_key)
         self.list_avail.setStyleSheet(
-            "QListWidget { background:#13131f; border:1px solid #313244;"
-            "  border-radius:0 0 6px 6px; }"
-            "QListWidget::item { padding:4px 8px; border-radius:3px; }"
-            "QListWidget::item:hover { background:#26263a; }"
-            "QListWidget::item:selected { background:#1e3a5a; color:#89b4fa; }")
+            f"QListWidget{{background:{F_LIST_BG};border:1px solid {F_LIST_BD};"
+            f"border-top:none;border-radius:0 0 8px 8px;}}"
+            f"QListWidget::item{{padding:6px 10px;border-radius:0;}}"
+            f"QListWidget::item:alternate{{background:{'#16161e' if self._is_dark else '#f5f7fb'};}}"
+            f"QListWidget::item:hover{{background:{F_LIST_HVR};}}"
+            f"QListWidget::item:selected{{background:{F_LIST_SEL};color:{F_LIST_SELTX};}}")
+        self.list_avail.setAlternatingRowColors(True)
         avail_lay.addWidget(self.list_avail, 1)
-
         fields_splitter.addWidget(avail_w)
 
-        # ── Coluna 2: Botões de transferência ──
+        # ── Coluna 2: Botões de transferência ────────────────────────────────
         arrows_w = QWidget()
-        arrows_w.setMinimumWidth(138)
+        arrows_w.setMinimumWidth(140)
         arrows_w.setMaximumWidth(160)
         arrows_w.setStyleSheet("background:transparent;")
         arrows_lay = QVBoxLayout(arrows_w)
         arrows_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arrows_lay.setSpacing(6)
-        arrows_lay.setContentsMargins(4, 8, 4, 8)
+        arrows_lay.setSpacing(8)
+        arrows_lay.setContentsMargins(6, 12, 6, 12)
 
         arrows_lay.addStretch()
 
-        def _arrow_btn(text: str, tooltip: str, color_bg: str,
-                        color_fg: str) -> QPushButton:
+        def _arrow_btn(text: str, tooltip: str,
+                       bg: str, fg: str) -> QPushButton:
             b = QPushButton(text)
-            b.setMinimumHeight(32)
-            b.setMinimumWidth(124)
+            b.setMinimumHeight(34)
+            b.setMinimumWidth(126)
             b.setMaximumWidth(152)
             b.setToolTip(tooltip)
             b.setStyleSheet(
-                f"QPushButton{{background:{color_bg};color:{color_fg};"
-                f"border:none;border-radius:6px;font-size:11px;"
-                f"font-weight:700;padding:4px 8px;}}"
-                f"QPushButton:hover{{opacity:0.85;}}"
-                f"QPushButton:pressed{{padding-top:6px;}}")
+                f"QPushButton{{background:{bg};color:{fg};"
+                f"border:none;border-radius:7px;font-size:11px;"
+                f"font-weight:700;padding:5px 8px;}}"
+                f"QPushButton:hover{{border:1px solid {fg};}}"
+                f"QPushButton:pressed{{padding-top:7px;}}")
             return b
 
         self.btn_to_key = _arrow_btn(
             "→ Campo Chave",
-            "Mover selecionados para campos chave (identifica o registro)",
-            "#2a1a3e", "#cba6f7")
+            "Mover selecionados para campos chave",
+            ARR_KEY_BG, ARR_KEY_FG)
         self.btn_to_key.clicked.connect(self._move_to_key)
         arrows_lay.addWidget(self.btn_to_key)
 
         self.btn_to_change = _arrow_btn(
             "→ Alterado",
-            "Mover selecionados para campos alterados (valores novos)",
-            "#1a2e1a", "#a6e3a1")
+            "Mover selecionados para campos alterados",
+            ARR_CHG_BG, ARR_CHG_FG)
         self.btn_to_change.clicked.connect(self._move_to_change)
         arrows_lay.addWidget(self.btn_to_change)
 
-        arrows_lay.addSpacing(8)
+        arrows_lay.addSpacing(10)
 
         self.btn_remove = _arrow_btn(
             "← Devolver",
-            "Devolver campo selecionado para a lista de disponíveis",
-            "#2a1a1a", "#f38ba8")
+            "Devolver campo selecionado para disponíveis",
+            ARR_REM_BG, ARR_REM_FG)
         self.btn_remove.clicked.connect(self._remove_from_lists)
         arrows_lay.addWidget(self.btn_remove)
 
-        arrows_lay.addSpacing(8)
+        arrows_lay.addSpacing(10)
 
         self.btn_reset = _arrow_btn(
             "↺ Redefinir",
             "Restaurar configuração padrão de campos",
-            "#252535", "#6c7086")
+            ARR_RST_BG, ARR_RST_FG)
         self.btn_reset.clicked.connect(self._load_defaults)
         arrows_lay.addWidget(self.btn_reset)
 
         arrows_lay.addStretch()
         fields_splitter.addWidget(arrows_w)
 
-        # ── Coluna 3: Campos Chave ──
+        # ── Coluna 3: Campos Chave ────────────────────────────────────────────
         key_w = QWidget()
         key_lay = QVBoxLayout(key_w)
         key_lay.setContentsMargins(0, 0, 0, 0)
-        key_lay.setSpacing(4)
+        key_lay.setSpacing(0)
 
-        key_lbl = QLabel("🔑  Campos Chave  (identificação do registro)")
+        key_hdr = QWidget()
+        key_hdr.setStyleSheet(
+            f"background:{KEY_HDR_BG}; border-radius:8px 8px 0 0;")
+        key_hdr_lay = QVBoxLayout(key_hdr)
+        key_hdr_lay.setContentsMargins(10, 8, 10, 6)
+        key_hdr_lay.setSpacing(2)
+        key_lbl = QLabel("🔑  Campos Chave")
         key_lbl.setStyleSheet(
-            "color:#cba6f7; font-size:12px; font-weight:700;"
-            "background:#2a1a3e; padding:6px 10px; border-radius:6px 6px 0 0;")
-        key_lay.addWidget(key_lbl)
-
+            f"color:{KEY_HDR_TXT}; font-size:12px; font-weight:700;"
+            "background:transparent;")
+        key_hdr_lay.addWidget(key_lbl)
         lbl_key_hint = QLabel("Identifica unicamente cada registro na tabela")
-        lbl_key_hint.setStyleSheet("color:#45475a; font-size:10px; padding:0 6px;")
-        key_lay.addWidget(lbl_key_hint)
+        lbl_key_hint.setStyleSheet(
+            f"color:{F_HINT_TXT}; font-size:10px; background:transparent;")
+        key_hdr_lay.addWidget(lbl_key_hint)
+        key_lay.addWidget(key_hdr)
 
         self.list_keys = FieldListWidget()
+        self.list_keys.setMinimumHeight(100)
         self.list_keys.itemDoubleClicked.connect(self._remove_key)
         self.list_keys.setStyleSheet(
-            "QListWidget { background:#13131f; border:1px solid #3a1a5e;"
-            "  border-radius:0 0 6px 6px; }"
-            "QListWidget::item { padding:4px 8px; border-radius:3px; }"
-            "QListWidget::item:hover { background:#2a1a3e; }"
-            "QListWidget::item:selected { background:#3a1a5e; color:#cba6f7; }")
+            f"QListWidget{{background:{F_LIST_BG};border:1px solid {KEY_LIST_BD};"
+            f"border-top:none;border-radius:0 0 8px 8px;}}"
+            f"QListWidget::item{{padding:6px 10px;}}"
+            f"QListWidget::item:hover{{background:{KEY_LIST_HVR};}}"
+            f"QListWidget::item:selected{{background:{KEY_LIST_SEL};color:{KEY_LIST_SELTX};}}")
         key_lay.addWidget(self.list_keys, 1)
-
         fields_splitter.addWidget(key_w)
 
-        # ── Coluna 4: Campos Alterados ──
+        # ── Coluna 4: Campos Alterados ────────────────────────────────────────
         chg_w = QWidget()
         chg_lay = QVBoxLayout(chg_w)
         chg_lay.setContentsMargins(0, 0, 0, 0)
-        chg_lay.setSpacing(4)
+        chg_lay.setSpacing(0)
 
-        chg_lbl = QLabel("✎  Campos Alterados  (valores novos a exportar)")
+        chg_hdr = QWidget()
+        chg_hdr.setStyleSheet(
+            f"background:{CHG_HDR_BG}; border-radius:8px 8px 0 0;")
+        chg_hdr_lay = QVBoxLayout(chg_hdr)
+        chg_hdr_lay.setContentsMargins(10, 8, 10, 6)
+        chg_hdr_lay.setSpacing(2)
+        chg_lbl = QLabel("✎  Campos Alterados")
         chg_lbl.setStyleSheet(
-            "color:#a6e3a1; font-size:12px; font-weight:700;"
-            "background:#1a2e1a; padding:6px 10px; border-radius:6px 6px 0 0;")
-        chg_lay.addWidget(chg_lbl)
-
+            f"color:{CHG_HDR_TXT}; font-size:12px; font-weight:700;"
+            "background:transparent;")
+        chg_hdr_lay.addWidget(chg_lbl)
         lbl_chg_hint = QLabel("Campos cujos valores novos serão exportados")
-        lbl_chg_hint.setStyleSheet("color:#45475a; font-size:10px; padding:0 6px;")
-        chg_lay.addWidget(lbl_chg_hint)
+        lbl_chg_hint.setStyleSheet(
+            f"color:{F_HINT_TXT}; font-size:10px; background:transparent;")
+        chg_hdr_lay.addWidget(lbl_chg_hint)
+        chg_lay.addWidget(chg_hdr)
 
         self.list_changes = FieldListWidget()
+        self.list_changes.setMinimumHeight(100)
         self.list_changes.itemDoubleClicked.connect(self._remove_change)
         self.list_changes.setStyleSheet(
-            "QListWidget { background:#13131f; border:1px solid #1a4e1a;"
-            "  border-radius:0 0 6px 6px; }"
-            "QListWidget::item { padding:4px 8px; border-radius:3px; }"
-            "QListWidget::item:hover { background:#1a2e1a; }"
-            "QListWidget::item:selected { background:#1a4e1a; color:#a6e3a1; }")
+            f"QListWidget{{background:{F_LIST_BG};border:1px solid {CHG_LIST_BD};"
+            f"border-top:none;border-radius:0 0 8px 8px;}}"
+            f"QListWidget::item{{padding:6px 10px;}}"
+            f"QListWidget::item:hover{{background:{CHG_LIST_HVR};}}"
+            f"QListWidget::item:selected{{background:{CHG_LIST_SEL};color:{CHG_LIST_SELTX};}}")
         chg_lay.addWidget(self.list_changes, 1)
-
         fields_splitter.addWidget(chg_w)
 
         # Impede colunas de desaparecerem completamente
@@ -703,27 +783,42 @@ class ExportDialog(QDialog):
 
         main_splitter.addWidget(top_w)
 
-        # ── Área inferior: Preview ──
+        # ── Área inferior: Preview ────────────────────────────────────────────
+        if self._is_dark:
+            PREV_BD = "#313244"
+            PREV_TXT_CLR = "#89b4fa"; PREV_CODE_BG = "#0d0d1a"
+            PREV_CODE_TXT = "#a6e3a1"; PREV_FMT_CLR = "#45475a"
+            RST_BTN_BG = "#26263a"; RST_BTN_TXT = "#6c7086"
+            RST_BTN_BD = "#313244"; RST_BTN_HVR = "#45475a"
+        else:
+            PREV_BD = "#b8bcd0"
+            PREV_TXT_CLR = "#1a5ab4"; PREV_CODE_BG = "#f8fbff"
+            PREV_CODE_TXT = "#1a4a1a"; PREV_FMT_CLR = "#8090a0"
+            RST_BTN_BG = "#dde1ea"; RST_BTN_TXT = "#5070a0"
+            RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
+
         preview_w = QWidget()
         prev_lay = QVBoxLayout(preview_w)
-        prev_lay.setContentsMargins(16, 8, 16, 8)
+        prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
 
         prev_toolbar = QHBoxLayout()
 
-        lbl_prev = QLabel("🔍  Preview do CSV  —  mostra primeiras 10 linhas")
+        lbl_prev = QLabel("🔍  Preview do CSV  —  primeiras 10 linhas")
         lbl_prev.setStyleSheet(
-            "color:#89b4fa; font-size:12px; font-weight:700;")
+            f"color:{PREV_TXT_CLR}; font-size:12px; font-weight:700;"
+            "background:transparent;")
         prev_toolbar.addWidget(lbl_prev)
 
-        # Botão para restaurar proporções dos splitters
+        # Botão restaurar layout
         btn_reset_layout = QPushButton("⊞ Restaurar Layout")
         btn_reset_layout.setFixedHeight(26)
         btn_reset_layout.setToolTip("Restaurar divisão original das seções")
         btn_reset_layout.setStyleSheet(
-            "QPushButton{background:#26263a;color:#6c7086;border:1px solid #313244;"
-            "border-radius:4px;font-size:11px;padding:0 8px;}"
-            "QPushButton:hover{background:#313244;color:#cdd6f4;}")
+            f"QPushButton{{background:{RST_BTN_BG};color:{RST_BTN_TXT};"
+            f"border:1px solid {RST_BTN_BD};border-radius:5px;"
+            f"font-size:11px;padding:0 10px;}}"
+            f"QPushButton:hover{{background:{RST_BTN_HVR};}}")
         btn_reset_layout.clicked.connect(self._reset_splitter_layout)
         prev_toolbar.addWidget(btn_reset_layout)
 
@@ -748,21 +843,22 @@ class ExportDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setFont(QFont("Consolas", 10))
-        self.preview_text.setMinimumHeight(40)   # mínimo baixo — permite recolher preview
+        self.preview_text.setMinimumHeight(40)
         self.preview_text.setStyleSheet(
-            "QTextEdit { background:#0d0d1a; color:#a6e3a1;"
-            "  border:1px solid #313244; border-radius:4px;"
-            "  padding:6px; line-height:1.4; }")
+            f"QTextEdit{{background:{PREV_CODE_BG};color:{PREV_CODE_TXT};"
+            f"border:1px solid {PREV_BD};border-radius:6px;"
+            f"padding:8px;line-height:1.5;}}")
         prev_lay.addWidget(self.preview_text, 1)
 
         lbl_format = QLabel(
             "ℹ  Formato: TABELA;ACAO;[CAMPOS_CHAVE...];[CAMPOS_ALTERADOS...];  "
             "(cada linha termina com ;  |  encoding: latin-1  |  separador: ;  |  MS-DOS \\r\\n)")
-        lbl_format.setStyleSheet("color:#45475a; font-size:10px; font-style:italic;")
+        lbl_format.setStyleSheet(
+            f"color:{PREV_FMT_CLR}; font-size:10px; font-style:italic;"
+            "background:transparent;")
         prev_lay.addWidget(lbl_format)
 
         main_splitter.addWidget(preview_w)
-        # Impede seções de serem totalmente colapsadas
         main_splitter.setCollapsible(0, False)
         main_splitter.setCollapsible(1, False)
         self._main_splitter = main_splitter
@@ -770,37 +866,41 @@ class ExportDialog(QDialog):
         root.addWidget(main_splitter, 1)
 
         # ══════════════════════════════════════════════════════════════
-        # BARRA DE BOTÕES FINAIS — sempre visível, nunca comprimida
+        # BARRA DE BOTÕES FINAIS — sempre visível (altura fixa)
         # ══════════════════════════════════════════════════════════════
+        if self._is_dark:
+            BTN_BAR_BG = "#181825"; BTN_BAR_BD = "#313244"
+        else:
+            BTN_BAR_BG = "#dde1ea"; BTN_BAR_BD = "#b8bcd0"
+
         btn_bar = QWidget()
-        btn_bar.setFixedHeight(54)
+        btn_bar.setFixedHeight(58)
         btn_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_bar.setStyleSheet(
-            "background:#181825; border-top:2px solid #313244;")
+            f"background:{BTN_BAR_BG}; border-top:2px solid {BTN_BAR_BD};")
         b_lay = QHBoxLayout(btn_bar)
-        b_lay.setContentsMargins(16, 8, 16, 8)
-        b_lay.setSpacing(8)
+        b_lay.setContentsMargins(16, 10, 16, 10)
+        b_lay.setSpacing(10)
 
         b_lay.addStretch()
 
         self.btn_cancel = QPushButton("Cancelar")
-        self.btn_cancel.setFixedHeight(36)
-        self.btn_cancel.setFixedWidth(100)
+        self.btn_cancel.setFixedHeight(38)
+        self.btn_cancel.setMinimumWidth(100)
         self.btn_cancel.clicked.connect(self.reject)
         b_lay.addWidget(self.btn_cancel)
 
         self.btn_export = QPushButton("💾  Exportar CSV Homologado")
-        self.btn_export.setFixedHeight(36)
-        self.btn_export.setMinimumWidth(220)
+        self.btn_export.setFixedHeight(38)
+        self.btn_export.setMinimumWidth(230)
         self.btn_export.setStyleSheet(
-            "QPushButton {"
-            "  background: qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            "    stop:0 #1e6ab4, stop:1 #1450a0);"
-            "  color: white; border: none; border-radius: 6px;"
-            "  font-size: 13px; font-weight: 800; padding: 0 16px;"
-            "}"
-            "QPushButton:hover { background: #2a7ac8; }"
-            "QPushButton:pressed { padding-top: 3px; }")
+            "QPushButton{"
+            "  background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "    stop:0 #1e6ab4,stop:1 #1450a0);"
+            "  color:white;border:none;border-radius:7px;"
+            "  font-size:13px;font-weight:800;padding:0 18px;}"
+            "QPushButton:hover{background:#2a7ac8;}"
+            "QPushButton:pressed{padding-top:4px;}")
         self.btn_export.clicked.connect(self._do_export)
         b_lay.addWidget(self.btn_export)
 
