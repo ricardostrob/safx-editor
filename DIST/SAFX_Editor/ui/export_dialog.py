@@ -122,19 +122,31 @@ class ExportDialog(QDialog):
 
     def _apply_splitter_sizes(self):
         """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
-        # ── Splitter vertical (Config+Campos | Preview) ──
         if hasattr(self, '_main_splitter'):
             total = self._main_splitter.height()
             if total > 100:
-                preview_h = max(150, int(total * 0.30))
-                top_h = max(280, total - preview_h)
+                preview_h = max(120, int(total * 0.28))
+                top_h = total - preview_h
                 self._main_splitter.setSizes([top_h, preview_h])
-
-        # ── Splitter horizontal das colunas de campos ──
         if hasattr(self, '_fields_splitter'):
             total_w = self._fields_splitter.width()
             if total_w > 400:
-                btns  = 148          # coluna de botões — tamanho fixo
+                btns  = 148
+                avail = max(200, int((total_w - btns) * 0.35))
+                rest  = max(140, (total_w - avail - btns) // 2)
+                self._fields_splitter.setSizes([avail, btns, rest, rest])
+
+    def _reset_splitter_layout(self):
+        """Reseta os splitters para as proporções padrão — acionado pelo botão ⊞."""
+        if hasattr(self, '_main_splitter'):
+            total = self._main_splitter.height()
+            if total > 100:
+                preview_h = max(120, int(total * 0.28))
+                self._main_splitter.setSizes([total - preview_h, preview_h])
+        if hasattr(self, '_fields_splitter'):
+            total_w = self._fields_splitter.width()
+            if total_w > 400:
+                btns  = 148
                 avail = max(200, int((total_w - btns) * 0.35))
                 rest  = max(140, (total_w - avail - btns) // 2)
                 self._fields_splitter.setSizes([avail, btns, rest, rest])
@@ -250,7 +262,7 @@ class ExportDialog(QDialog):
 
         # ── Modo de exportação — cards visuais ────────────────────────────────
         mode_group = QGroupBox("Modo de Exportação")
-        mode_group.setFixedHeight(96)
+        mode_group.setMaximumHeight(100)   # máximo, não fixo — permite splitter recolher
         if self._is_dark:
             mode_group.setStyleSheet(
                 "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
@@ -318,9 +330,9 @@ class ExportDialog(QDialog):
 
         top_lay.addWidget(mode_group)
 
-        # ── Container de altura fixa para a linha Ação|Escopo|Destino ──────────
+        # ── Container para a linha Ação|Escopo|Destino ───────────────────────
         config_container = QWidget()
-        config_container.setFixedHeight(128)
+        config_container.setMaximumHeight(158)   # máximo, não fixo
         config_lay = QHBoxLayout(config_container)
         config_lay.setContentsMargins(0, 0, 0, 0)
         config_lay.setSpacing(10)
@@ -446,15 +458,16 @@ class ExportDialog(QDialog):
             def _open(_c=False, _i=tab_idx):
                 try:
                     from ui.settings_dialog import SettingsDialog
-                    # Encontra a janela principal para passar como parent
-                    p = self.parent()
-                    while p and not hasattr(p, 'statusBar'):
-                        p = p.parent()
-                    dlg = SettingsDialog(p or self)
-                    dlg.tabs.setCurrentIndex(_i)
+                    # Usa self (ExportDialog) como parent — garante que abre na frente
+                    dlg = SettingsDialog(self)
+                    dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+                    if hasattr(dlg, 'tabs'):
+                        dlg.tabs.setCurrentIndex(_i)
                     dlg.exec()
                 except Exception as ex:
                     logger.warning(f"Configurações: {ex}")
+                    QMessageBox.warning(self, "Configurações",
+                                        f"Não foi possível abrir as configurações:\n{ex}")
             btn.clicked.connect(_open)
             return btn
 
@@ -679,7 +692,11 @@ class ExportDialog(QDialog):
 
         fields_splitter.addWidget(chg_w)
 
-        # Salva referência — proporções aplicadas no showEvent após resize
+        # Impede colunas de desaparecerem completamente
+        fields_splitter.setCollapsible(0, False)
+        fields_splitter.setCollapsible(1, False)
+        fields_splitter.setCollapsible(2, False)
+        fields_splitter.setCollapsible(3, False)
         self._fields_splitter = fields_splitter
 
         top_lay.addWidget(fields_splitter, 1)
@@ -698,6 +715,17 @@ class ExportDialog(QDialog):
         lbl_prev.setStyleSheet(
             "color:#89b4fa; font-size:12px; font-weight:700;")
         prev_toolbar.addWidget(lbl_prev)
+
+        # Botão para restaurar proporções dos splitters
+        btn_reset_layout = QPushButton("⊞ Restaurar Layout")
+        btn_reset_layout.setFixedHeight(26)
+        btn_reset_layout.setToolTip("Restaurar divisão original das seções")
+        btn_reset_layout.setStyleSheet(
+            "QPushButton{background:#26263a;color:#6c7086;border:1px solid #313244;"
+            "border-radius:4px;font-size:11px;padding:0 8px;}"
+            "QPushButton:hover{background:#313244;color:#cdd6f4;}")
+        btn_reset_layout.clicked.connect(self._reset_splitter_layout)
+        prev_toolbar.addWidget(btn_reset_layout)
 
         self.btn_preview = QPushButton("▶  Gerar Preview")
         self.btn_preview.setFixedHeight(30)
@@ -720,6 +748,7 @@ class ExportDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setFont(QFont("Consolas", 10))
+        self.preview_text.setMinimumHeight(40)   # mínimo baixo — permite recolher preview
         self.preview_text.setStyleSheet(
             "QTextEdit { background:#0d0d1a; color:#a6e3a1;"
             "  border:1px solid #313244; border-radius:4px;"
@@ -733,7 +762,9 @@ class ExportDialog(QDialog):
         prev_lay.addWidget(lbl_format)
 
         main_splitter.addWidget(preview_w)
-        # Splitter sem setSizes fixo — o showEvent aplica após o resize
+        # Impede seções de serem totalmente colapsadas
+        main_splitter.setCollapsible(0, False)
+        main_splitter.setCollapsible(1, False)
         self._main_splitter = main_splitter
 
         root.addWidget(main_splitter, 1)
