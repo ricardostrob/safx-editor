@@ -93,12 +93,12 @@ class ExportDialog(QDialog):
         from ui.styles import get_style
         self.setStyleSheet(get_style(self._theme))
 
+        self._splitter_initialized = False   # aplicar tamanhos apenas uma vez
         self._setup_ui()
         self._load_defaults()
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Ajusta ao monitor e aplica splitter após layout estar pronto
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
@@ -111,29 +111,32 @@ class ExportDialog(QDialog):
                 geo.x() + (geo.width() - w) // 2,
                 geo.y() + (geo.height() - h) // 2,
             )
-        QTimer.singleShot(0, self._apply_splitter_sizes)
+        if not self._splitter_initialized:
+            self._splitter_initialized = True
+            # Aguarda o layout estar finalizado antes de aplicar tamanhos
+            QTimer.singleShot(80, self._apply_splitter_sizes)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._apply_splitter_sizes)
+        # NÃO reseta splitters no resize — deixa o usuário manter sua expansão
 
     def _apply_splitter_sizes(self):
-        """Distribui o espaço dos splitters proporcionalmente após o resize."""
+        """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
         # ── Splitter vertical (Config+Campos | Preview) ──
         if hasattr(self, '_main_splitter'):
             total = self._main_splitter.height()
             if total > 100:
-                preview_h = max(140, int(total * 0.32))
-                top_h = max(260, total - preview_h)
+                preview_h = max(150, int(total * 0.30))
+                top_h = max(280, total - preview_h)
                 self._main_splitter.setSizes([top_h, preview_h])
 
         # ── Splitter horizontal das colunas de campos ──
         if hasattr(self, '_fields_splitter'):
             total_w = self._fields_splitter.width()
             if total_w > 400:
-                avail = max(200, int(total_w * 0.30))
-                btns  = max(120, int(total_w * 0.13))
-                rest  = (total_w - avail - btns) // 2
+                btns  = 148          # coluna de botões — tamanho fixo
+                avail = max(200, int((total_w - btns) * 0.35))
+                rest  = max(140, (total_w - avail - btns) // 2)
                 self._fields_splitter.setSizes([avail, btns, rest, rest])
 
     # ─── UI ───────────────────────────────────────────────────────────────────
@@ -417,9 +420,54 @@ class ExportDialog(QDialog):
             for rb_ in _dest_rbs:
                 rb_.setStyleSheet(_dst_checked if rb_.isChecked() else _dst_normal)
 
-        for rb in _dest_rbs:
+        # Estilo do botão de engrenagem (tema-aware)
+        if self._is_dark:
+            _gear_style = (
+                "QToolButton{background:#313244;color:#6c7086;border:none;"
+                "border-radius:4px;padding:3px 5px;font-size:13px;}"
+                "QToolButton:hover{background:#45475a;color:#cdd6f4;}")
+        else:
+            _gear_style = (
+                "QToolButton{background:#dde1ea;color:#6070a0;border:none;"
+                "border-radius:4px;padding:3px 5px;font-size:13px;}"
+                "QToolButton:hover{background:#b8bcd0;color:#1a1a2e;}")
+
+        def _make_gear_btn(settings_tab: str) -> "QToolButton":
+            """Cria botão ⚙ que abre o diálogo de configurações na aba correta."""
+            btn = QToolButton()
+            btn.setText("⚙")
+            btn.setToolTip("Abrir configurações")
+            btn.setFixedSize(26, 26)
+            btn.setStyleSheet(_gear_style)
+            def _open_settings(_checked=False, _tab=settings_tab):
+                try:
+                    from ui.settings_dialog import SettingsDialog
+                    dlg = SettingsDialog(self.parent() or self)
+                    # Tenta navegar para a aba correta
+                    if hasattr(dlg, 'tabs'):
+                        for i in range(dlg.tabs.count()):
+                            if _tab.lower() in dlg.tabs.tabText(i).lower():
+                                dlg.tabs.setCurrentIndex(i)
+                                break
+                    dlg.exec()
+                except Exception as e:
+                    logger.warning(f"Erro ao abrir configurações: {e}")
+            btn.clicked.connect(_open_settings)
+            return btn
+
+        # Adiciona radio buttons; Servidor e SFTP com botão ⚙
+        for i, rb in enumerate(_dest_rbs):
             rb.toggled.connect(_update_dst_styles)
-            dg_lay.addWidget(rb)
+            if i in (2, 3):   # Servidor (2) e SFTP (3) têm engrenagem
+                tab_name = "sftp" if i == 3 else "exportação"
+                row = QHBoxLayout()
+                row.setContentsMargins(0, 0, 0, 0)
+                row.setSpacing(4)
+                row.addWidget(rb, 1)
+                row.addWidget(_make_gear_btn(tab_name))
+                dg_lay.addLayout(row)
+            else:
+                dg_lay.addWidget(rb)
 
         _update_dst_styles()
         dg_lay.addStretch()
@@ -500,54 +548,60 @@ class ExportDialog(QDialog):
 
         # ── Coluna 2: Botões de transferência ──
         arrows_w = QWidget()
-        arrows_w.setFixedWidth(130)
+        arrows_w.setMinimumWidth(138)
+        arrows_w.setMaximumWidth(160)
         arrows_w.setStyleSheet("background:transparent;")
         arrows_lay = QVBoxLayout(arrows_w)
         arrows_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arrows_lay.setSpacing(8)
-        arrows_lay.setContentsMargins(4, 0, 4, 0)
+        arrows_lay.setSpacing(6)
+        arrows_lay.setContentsMargins(4, 8, 4, 8)
 
         arrows_lay.addStretch()
 
         def _arrow_btn(text: str, tooltip: str, color_bg: str,
                         color_fg: str) -> QPushButton:
             b = QPushButton(text)
-            b.setFixedHeight(32)
-            b.setMinimumWidth(110)
+            b.setMinimumHeight(32)
+            b.setMinimumWidth(124)
+            b.setMaximumWidth(152)
             b.setToolTip(tooltip)
             b.setStyleSheet(
                 f"QPushButton{{background:{color_bg};color:{color_fg};"
-                f"border:none;border-radius:6px;font-size:12px;"
-                f"font-weight:700;padding:0 8px;}}"
-                f"QPushButton:hover{{filter:brightness(1.2);}}"
-                f"QPushButton:pressed{{padding-top:3px;}}")
+                f"border:none;border-radius:6px;font-size:11px;"
+                f"font-weight:700;padding:4px 8px;}}"
+                f"QPushButton:hover{{opacity:0.85;}}"
+                f"QPushButton:pressed{{padding-top:6px;}}")
             return b
 
         self.btn_to_key = _arrow_btn(
-            "→ Campo Chave", "Mover para campos chave (identifica o registro)",
+            "→ Campo Chave",
+            "Mover selecionados para campos chave (identifica o registro)",
             "#2a1a3e", "#cba6f7")
         self.btn_to_key.clicked.connect(self._move_to_key)
         arrows_lay.addWidget(self.btn_to_key)
 
         self.btn_to_change = _arrow_btn(
-            "→ Campo Alterado", "Mover para campos alterados (valores novos)",
+            "→ Alterado",
+            "Mover selecionados para campos alterados (valores novos)",
             "#1a2e1a", "#a6e3a1")
         self.btn_to_change.clicked.connect(self._move_to_change)
         arrows_lay.addWidget(self.btn_to_change)
 
-        arrows_lay.addSpacing(12)
+        arrows_lay.addSpacing(8)
 
         self.btn_remove = _arrow_btn(
-            "← Devolver", "Devolver campo selecionado para disponíveis",
+            "← Devolver",
+            "Devolver campo selecionado para a lista de disponíveis",
             "#2a1a1a", "#f38ba8")
         self.btn_remove.clicked.connect(self._remove_from_lists)
         arrows_lay.addWidget(self.btn_remove)
 
-        arrows_lay.addSpacing(12)
+        arrows_lay.addSpacing(8)
 
         self.btn_reset = _arrow_btn(
-            "↺ Redefinir", "Restaurar configuração padrão de campos",
-            "#1e1e2e", "#6c7086")
+            "↺ Redefinir",
+            "Restaurar configuração padrão de campos",
+            "#252535", "#6c7086")
         self.btn_reset.clicked.connect(self._load_defaults)
         arrows_lay.addWidget(self.btn_reset)
 
