@@ -81,12 +81,17 @@ class ExportDialog(QDialog):
         self._avail_all: List[str] = []   # todos sem filtragem
 
         self.setWindowTitle(f"Exportar {table_name} — Formato Homologado")
-        # Tamanho mínimo menor para caber em qualquer monitor
         self.setMinimumSize(860, 560)
         self.setSizeGripEnabled(True)
 
-        from ui.styles import MAIN_STYLE
-        self.setStyleSheet(MAIN_STYLE)
+        # Detecta tema ativo
+        from core.config import AppConfig
+        _cfg = AppConfig.get()
+        self._theme = _cfg.get_value("ui", "theme", "dark") or "dark"
+        self._is_dark = (self._theme != "light")
+
+        from ui.styles import get_style
+        self.setStyleSheet(get_style(self._theme))
 
         self._setup_ui()
         self._load_defaults()
@@ -138,29 +143,86 @@ class ExportDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # ── Cores do tema ──────────────────────────────────────────────────────
+        if self._is_dark:
+            H_BG     = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0e1b2e,stop:1 #1a2638)"
+            H_BORDER = "#313244"
+            H_TITLE  = "#89b4fa"
+            H_SUB    = "#6c7086"
+            # Modo cards
+            CARD_BG      = "#252535"
+            CARD_BORDER  = "#45475a"
+            CARD_SEL_BG  = "#1e3a5a"
+            CARD_SEL_BD  = "#89b4fa"
+            CARD_SEL_CLR = "#89b4fa"
+            CARD_TXT     = "#a6adc8"
+            CARD_HOVER   = "#2a2a42"
+            # Destino
+            DST_BG       = "#252535"
+            DST_BORDER   = "#45475a"
+            DST_SEL_BG   = "#1a3a1a"
+            DST_SEL_BD   = "#a6e3a1"
+            DST_SEL_CLR  = "#a6e3a1"
+            DST_TXT      = "#a6adc8"
+            DST_HOVER    = "#2a2a42"
+        else:
+            H_BG     = "qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #1a5ab4,stop:1 #2468c8)"
+            H_BORDER = "#b8bcd0"
+            H_TITLE  = "#ffffff"
+            H_SUB    = "#dce8ff"
+            # Modo cards
+            CARD_BG      = "#ffffff"
+            CARD_BORDER  = "#b8bcd0"
+            CARD_SEL_BG  = "#1a5ab4"
+            CARD_SEL_BD  = "#1a5ab4"
+            CARD_SEL_CLR = "#ffffff"
+            CARD_TXT     = "#1a1a2e"
+            CARD_HOVER   = "#e8f0fa"
+            # Destino
+            DST_BG       = "#ffffff"
+            DST_BORDER   = "#b8bcd0"
+            DST_SEL_BG   = "#e8f8ee"
+            DST_SEL_BD   = "#2a8a4a"
+            DST_SEL_CLR  = "#1a6a30"
+            DST_TXT      = "#1a1a2e"
+            DST_HOVER    = "#e8f0fa"
+
+        self._CARD_BG     = CARD_BG
+        self._CARD_BORDER = CARD_BORDER
+        self._CARD_SEL_BG = CARD_SEL_BG
+        self._CARD_SEL_BD = CARD_SEL_BD
+        self._CARD_SEL_CLR= CARD_SEL_CLR
+        self._CARD_TXT    = CARD_TXT
+        self._CARD_HOVER  = CARD_HOVER
+        self._DST_BG      = DST_BG
+        self._DST_BORDER  = DST_BORDER
+        self._DST_SEL_BG  = DST_SEL_BG
+        self._DST_SEL_BD  = DST_SEL_BD
+        self._DST_SEL_CLR = DST_SEL_CLR
+        self._DST_TXT     = DST_TXT
+        self._DST_HOVER   = DST_HOVER
+
         # ══════════════════════════════════════════════════════════════
         # HEADER
         # ══════════════════════════════════════════════════════════════
         header_w = QWidget()
         header_w.setFixedHeight(54)
         header_w.setStyleSheet(
-            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "  stop:0 #0e1b2e, stop:1 #1a2638);"
-            "border-bottom: 2px solid #313244;")
+            f"background:{H_BG};border-bottom:2px solid {H_BORDER};")
         h_lay = QHBoxLayout(header_w)
         h_lay.setContentsMargins(20, 0, 20, 0)
 
         title = QLabel(f"📤  Exportar {self.table_name}")
         title.setStyleSheet(
-            "color:#89b4fa; font-size:17px; font-weight:800; letter-spacing:0.5px;")
+            f"color:{H_TITLE};font-size:17px;font-weight:800;letter-spacing:0.5px;"
+            "background:transparent;")
         h_lay.addWidget(title)
-
         h_lay.addStretch()
 
         count_lbl = QLabel(
             f"{len(self.selected_row_ids):,} selecionados  |  "
             f"{len(self.all_row_ids):,} total filtrado")
-        count_lbl.setStyleSheet("color:#6c7086; font-size:12px;")
+        count_lbl.setStyleSheet(f"color:{H_SUB};font-size:12px;background:transparent;")
         h_lay.addWidget(count_lbl)
 
         root.addWidget(header_w)
@@ -183,39 +245,68 @@ class ExportDialog(QDialog):
         top_lay.setContentsMargins(16, 12, 16, 8)
         top_lay.setSpacing(10)
 
-        # ── Modo de exportação ──
+        # ── Modo de exportação — cards visuais ────────────────────────────────
         mode_group = QGroupBox("Modo de Exportação")
-        mode_group.setStyleSheet(
-            "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
-            "border:1px solid #1e3a5a;border-radius:6px;margin-top:8px;padding:8px;}"
-            "QGroupBox::title{padding:0 6px;}")
+        if self._is_dark:
+            mode_group.setStyleSheet(
+                "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
+                "border:1px solid #313244;border-radius:8px;margin-top:10px;padding:10px 8px 8px 8px;}"
+                "QGroupBox::title{padding:0 8px;background:#1e1e2e;}")
+        else:
+            mode_group.setStyleSheet(
+                "QGroupBox{color:#1a5ab4;font-size:12px;font-weight:700;"
+                "border:1px solid #b8bcd0;border-radius:8px;margin-top:10px;padding:10px 8px 8px 8px;}"
+                "QGroupBox::title{padding:0 8px;background:#f0f2f5;}")
+
         mode_lay = QHBoxLayout(mode_group)
-        mode_lay.setSpacing(16)
+        mode_lay.setSpacing(10)
+        mode_lay.setContentsMargins(4, 4, 4, 4)
 
-        self.rb_mode_homolog = QRadioButton(
-            "📋  Homologado (TABELA;ACAO;CHAVES;ALTERADOS)")
-        self.rb_mode_homolog.setChecked(True)
-        self.rb_mode_homolog.setToolTip(
-            "Exporta no formato homologado: TABELA;ACAO;[campos chave];[campos alterados];")
+        # Cards: usamos QRadioButton mas estilizamos como card
+        _MODES = [
+            ("rb_mode_homolog",     "📋",  "Homologado",   "TABELA;AÇÃO;CHAVES;ALTERADOS",
+             "Formato padrão homologado MasterSAF\n(CSV com separador ;)"),
+            ("rb_mode_full",        "📄",  "SAFX Completo","Formato original tab-separado",
+             "Exporta todos os campos\nno mesmo formato de importação (TAB)"),
+            ("rb_mode_changed_only","✎",  "Só alterados", "Apenas registros modificados",
+             "Exporta somente os registros\nalterados nesta sessão (homologado)"),
+        ]
 
-        self.rb_mode_full = QRadioButton(
-            "📄  SAFX Completo (formato original tab-separado)")
-        self.rb_mode_full.setToolTip(
-            "Exporta todos os campos no mesmo formato que o arquivo SAFX foi importado (tab-separado)")
+        self.rb_mode_homolog = QRadioButton()
+        self.rb_mode_full = QRadioButton()
+        self.rb_mode_changed_only = QRadioButton()
+        _rb_refs = [self.rb_mode_homolog, self.rb_mode_full, self.rb_mode_changed_only]
 
-        self.rb_mode_changed_only = QRadioButton(
-            "✎  Apenas registros alterados (homologado)")
-        self.rb_mode_changed_only.setToolTip(
-            "Exporta apenas os registros que foram modificados nesta sessão")
+        _normal_card = (
+            f"QRadioButton{{color:{CARD_TXT};font-size:12px;"
+            f"background:{CARD_BG};border:2px solid {CARD_BORDER};"
+            f"border-radius:8px;padding:10px 14px;min-width:170px;"
+            f"font-weight:500;}}"
+            f"QRadioButton:hover{{background:{CARD_HOVER};"
+            f"border-color:#6c7086;}}"
+            f"QRadioButton::indicator{{width:0;height:0;}}")
+        _checked_card = (
+            f"QRadioButton{{color:{CARD_SEL_CLR};font-size:12px;"
+            f"background:{CARD_SEL_BG};border:2px solid {CARD_SEL_BD};"
+            f"border-radius:8px;padding:10px 14px;min-width:170px;"
+            f"font-weight:700;}}"
+            f"QRadioButton::indicator{{width:0;height:0;}}")
 
-        for rb in (self.rb_mode_homolog, self.rb_mode_full, self.rb_mode_changed_only):
-            rb.setStyleSheet(
-                "QRadioButton{color:#cdd6f4;font-size:12px;padding:3px 6px;border-radius:4px;}"
-                "QRadioButton:checked{color:#89b4fa;font-weight:700;background:#1a2638;}"
-                "QRadioButton:hover{color:white;}")
+        def _update_mode_styles():
+            for rb_ in _rb_refs:
+                rb_.setStyleSheet(_checked_card if rb_.isChecked() else _normal_card)
+
+        for attr, icon, title_txt, sub_txt, tip in _MODES:
+            rb = getattr(self, attr)
+            rb.setText(f"{icon}  {title_txt}\n{sub_txt}")
+            rb.setToolTip(tip)
+            rb.setStyleSheet(_normal_card)
+            rb.toggled.connect(_update_mode_styles)
             mode_lay.addWidget(rb)
 
         mode_lay.addStretch()
+        self.rb_mode_homolog.setChecked(True)
+        _update_mode_styles()
 
         self.rb_mode_homolog.toggled.connect(self._on_mode_changed)
         self.rb_mode_full.toggled.connect(self._on_mode_changed)
@@ -227,8 +318,23 @@ class ExportDialog(QDialog):
         config_lay = QHBoxLayout()
         config_lay.setSpacing(12)
 
+        # Estilo para os GroupBoxes internos (tema-aware)
+        if self._is_dark:
+            _gb_style = (
+                "QGroupBox{color:#a6adc8;font-size:11px;font-weight:700;"
+                "border:1px solid #313244;border-radius:7px;"
+                "margin-top:10px;padding:10px 8px 8px 8px;}"
+                "QGroupBox::title{padding:0 6px;background:#1e1e2e;color:#89b4fa;}")
+        else:
+            _gb_style = (
+                "QGroupBox{color:#1a1a2e;font-size:11px;font-weight:700;"
+                "border:1px solid #b8bcd0;border-radius:7px;"
+                "margin-top:10px;padding:10px 8px 8px 8px;}"
+                "QGroupBox::title{padding:0 6px;background:#f0f2f5;color:#1a5ab4;}")
+
         # Ação
         action_group = QGroupBox("Ação")
+        action_group.setStyleSheet(_gb_style)
         action_group.setFixedWidth(130)
         ag_lay = QVBoxLayout(action_group)
         ag_lay.setContentsMargins(8, 8, 8, 8)
@@ -242,6 +348,7 @@ class ExportDialog(QDialog):
 
         # Escopo
         scope_group = QGroupBox("Escopo")
+        scope_group.setStyleSheet(_gb_style)
         scope_group.setFixedWidth(230)
         sg_lay = QVBoxLayout(scope_group)
         sg_lay.setContentsMargins(8, 8, 8, 8)
@@ -258,10 +365,11 @@ class ExportDialog(QDialog):
         sg_lay.addStretch()
         config_lay.addWidget(scope_group)
 
-        # Destino
+        # Destino — radio cards com indicador visual claro
         dest_group = QGroupBox("Destino")
+        dest_group.setStyleSheet(_gb_style)
         dg_lay = QVBoxLayout(dest_group)
-        dg_lay.setContentsMargins(8, 8, 8, 8)
+        dg_lay.setContentsMargins(6, 8, 6, 6)
         dg_lay.setSpacing(4)
 
         cfg = AppConfig.get()
@@ -269,14 +377,16 @@ class ExportDialog(QDialog):
         sftp_cfg = cfg.sftp
         default_dest = exp_cfg.get("default_destination", "local")
 
-        self.rb_local = QRadioButton("Local (diálogo de arquivo)")
-        self.rb_dir   = QRadioButton(
-            f"Pasta local: {(exp_cfg.get('local_dir','') or '—')[:35]}")
-        self.rb_srv   = QRadioButton(
-            f"Servidor: {(exp_cfg.get('server_dir','') or '—')[:35]}")
-        sftp_host = sftp_cfg.get("host", "") if sftp_cfg.get("enabled") else ""
-        self.rb_sftp  = QRadioButton(
-            f"SFTP: {sftp_host or '(não configurado)'}")
+        local_dir_txt  = (exp_cfg.get('local_dir','') or '—')
+        local_dir_disp = local_dir_txt[:32] + "…" if len(local_dir_txt) > 32 else local_dir_txt
+        srv_dir_txt    = (exp_cfg.get('server_dir','') or '—')
+        srv_dir_disp   = srv_dir_txt[:32] + "…" if len(srv_dir_txt) > 32 else srv_dir_txt
+        sftp_host      = sftp_cfg.get("host","") if sftp_cfg.get("enabled") else ""
+
+        self.rb_local = QRadioButton("📂  Salvar arquivo (diálogo)")
+        self.rb_dir   = QRadioButton(f"📁  Pasta: {local_dir_disp}")
+        self.rb_srv   = QRadioButton(f"🖥  Servidor: {srv_dir_disp}")
+        self.rb_sftp  = QRadioButton(f"☁  SFTP: {sftp_host or '(não configurado)'}")
 
         self._dest_group = QButtonGroup(self)
         self._dest_group.addButton(self.rb_local, 0)
@@ -288,27 +398,30 @@ class ExportDialog(QDialog):
                   "dir_srv": self.rb_srv, "sftp": self.rb_sftp}
         rb_map.get(default_dest, self.rb_local).setChecked(True)
 
-        _rb_normal = (
-            "QRadioButton{color:#6c7086;font-size:11px;padding:4px 8px;"
-            "border-radius:5px;border:1px solid transparent;}"
-            "QRadioButton:hover{color:#cdd6f4;background:#26263a;}"
-            "QRadioButton::indicator{width:14px;height:14px;}")
-        _rb_checked = (
-            "QRadioButton{color:#89b4fa;font-size:11px;font-weight:700;"
-            "padding:4px 8px;border-radius:5px;"
-            "border:1px solid #89b4fa;background:#1e3a5a;}"
-            "QRadioButton::indicator{width:14px;height:14px;}")
+        _dst_normal = (
+            f"QRadioButton{{color:{DST_TXT};font-size:12px;padding:5px 10px;"
+            f"border-radius:6px;border:1px solid {DST_BORDER};"
+            f"background:{DST_BG};font-weight:500;}}"
+            f"QRadioButton:hover{{background:{DST_HOVER};"
+            f"border-color:#6c7086;}}"
+            f"QRadioButton::indicator{{width:13px;height:13px;}}")
+        _dst_checked = (
+            f"QRadioButton{{color:{DST_SEL_CLR};font-size:12px;padding:5px 10px;"
+            f"border-radius:6px;border:2px solid {DST_SEL_BD};"
+            f"background:{DST_SEL_BG};font-weight:700;}}"
+            f"QRadioButton::indicator{{width:13px;height:13px;}}")
 
-        def _update_rb_styles():
-            for rb in (self.rb_local, self.rb_dir, self.rb_srv, self.rb_sftp):
-                rb.setStyleSheet(_rb_checked if rb.isChecked() else _rb_normal)
+        _dest_rbs = (self.rb_local, self.rb_dir, self.rb_srv, self.rb_sftp)
 
-        for rb in (self.rb_local, self.rb_dir, self.rb_srv, self.rb_sftp):
-            rb.setStyleSheet(_rb_normal)
-            rb.toggled.connect(_update_rb_styles)
+        def _update_dst_styles():
+            for rb_ in _dest_rbs:
+                rb_.setStyleSheet(_dst_checked if rb_.isChecked() else _dst_normal)
+
+        for rb in _dest_rbs:
+            rb.toggled.connect(_update_dst_styles)
             dg_lay.addWidget(rb)
 
-        _update_rb_styles()
+        _update_dst_styles()
         dg_lay.addStretch()
         config_lay.addWidget(dest_group)
         config_lay.addStretch()

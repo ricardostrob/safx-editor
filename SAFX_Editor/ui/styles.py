@@ -418,6 +418,25 @@ QCheckBox::indicator:checked {
     border-color: #89b4fa;
 }
 
+/* ───── RADIO BUTTON ───── */
+QRadioButton {
+    color: #cdd6f4;
+    spacing: 8px;
+}
+
+QRadioButton::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    border: 2px solid #45475a;
+    background: #313244;
+}
+
+QRadioButton::indicator:checked {
+    background-color: #89b4fa;
+    border-color: #89b4fa;
+}
+
 /* ───── GROUP BOX ───── */
 QGroupBox {
     color: #a6adc8;
@@ -610,8 +629,26 @@ QProgressBar::chunk { background: #4a90d9; border-radius: 4px; }
 QDialog { background: #f0f2f5; }
 QGroupBox { color: #1a1a2e; border: 1px solid #b8bcd0; border-radius: 6px; margin-top: 8px; padding: 8px; }
 QGroupBox::title { color: #1a1a2e; padding: 0 6px; }
-QCheckBox { color: #1a1a2e; }
-QRadioButton { color: #1a1a2e; }
+QCheckBox { color: #1a1a2e; spacing: 8px; }
+QCheckBox::indicator {
+    width: 16px; height: 16px;
+    border: 2px solid #7090b0; border-radius: 4px;
+    background: white;
+}
+QCheckBox::indicator:checked {
+    background: #1a5ab4; border-color: #1a5ab4;
+}
+
+QRadioButton { color: #1a1a2e; spacing: 8px; }
+QRadioButton::indicator {
+    width: 16px; height: 16px;
+    border: 2px solid #7090b0; border-radius: 8px;
+    background: white;
+}
+QRadioButton::indicator:checked {
+    background: #1a5ab4; border-color: #1a5ab4;
+}
+
 QLabel { color: #1a1a2e; }
 QStatusBar { background: #dde1ea; color: #1a1a2e; border-top: 1px solid #b8bcd0; }
 QToolTip { background: white; color: #1a1a2e; border: 1px solid #b8bcd0; border-radius: 4px; padding: 4px 8px; }
