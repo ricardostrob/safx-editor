@@ -1,0 +1,18 @@
+# SAFX Editor — Dependências
+# Instale com: pip install -r requirements.txt
+
+# Interface gráfica
+PyQt6>=6.4.0
+
+# API REST embutida (opcional — necessário para habilitar API REST)
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# SFTP (opcional — necessário para envio via SFTP)
+paramiko>=3.0.0
+
+# Importação de planilhas Excel (JOIN com dados externos)
+openpyxl>=3.1.0
+
+# Utilitários (já incluídos no Python padrão)
+# pathlib, json, threading, logging, sqlite3, tempfile, subprocess
