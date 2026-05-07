@@ -11,8 +11,8 @@ from typing import List, Dict, Optional
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                              QPushButton, QComboBox, QListWidget,
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
+                              QLabel, QPushButton, QComboBox, QListWidget,
                               QListWidgetItem, QFileDialog, QTextEdit,
                               QGroupBox, QMessageBox, QFrame, QSplitter,
                               QWidget, QAbstractItemView, QSizePolicy,
@@ -245,11 +245,12 @@ class ExportDialog(QDialog):
         # ── Área superior: Config + Campos ──
         top_w = QWidget()
         top_lay = QVBoxLayout(top_w)
-        top_lay.setContentsMargins(16, 12, 16, 8)
-        top_lay.setSpacing(10)
+        top_lay.setContentsMargins(14, 8, 14, 4)
+        top_lay.setSpacing(6)
 
         # ── Modo de exportação — cards visuais ────────────────────────────────
         mode_group = QGroupBox("Modo de Exportação")
+        mode_group.setFixedHeight(96)
         if self._is_dark:
             mode_group.setStyleSheet(
                 "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
@@ -263,7 +264,7 @@ class ExportDialog(QDialog):
 
         mode_lay = QHBoxLayout(mode_group)
         mode_lay.setSpacing(10)
-        mode_lay.setContentsMargins(4, 4, 4, 4)
+        mode_lay.setContentsMargins(4, 2, 4, 4)
 
         # Cards: usamos QRadioButton mas estilizamos como card
         _MODES = [
@@ -317,33 +318,37 @@ class ExportDialog(QDialog):
 
         top_lay.addWidget(mode_group)
 
-        # Linha de configuração: Ação | Escopo | Destino
-        config_lay = QHBoxLayout()
-        config_lay.setSpacing(12)
+        # ── Container de altura fixa para a linha Ação|Escopo|Destino ──────────
+        config_container = QWidget()
+        config_container.setFixedHeight(128)
+        config_lay = QHBoxLayout(config_container)
+        config_lay.setContentsMargins(0, 0, 0, 0)
+        config_lay.setSpacing(10)
 
-        # Estilo para os GroupBoxes internos (tema-aware)
+        # Estilo para GroupBoxes internos (tema-aware)
         if self._is_dark:
             _gb_style = (
                 "QGroupBox{color:#a6adc8;font-size:11px;font-weight:700;"
                 "border:1px solid #313244;border-radius:7px;"
-                "margin-top:10px;padding:10px 8px 8px 8px;}"
+                "margin-top:10px;padding:8px 6px 6px 6px;}"
                 "QGroupBox::title{padding:0 6px;background:#1e1e2e;color:#89b4fa;}")
         else:
             _gb_style = (
                 "QGroupBox{color:#1a1a2e;font-size:11px;font-weight:700;"
                 "border:1px solid #b8bcd0;border-radius:7px;"
-                "margin-top:10px;padding:10px 8px 8px 8px;}"
+                "margin-top:10px;padding:8px 6px 6px 6px;}"
                 "QGroupBox::title{padding:0 6px;background:#f0f2f5;color:#1a5ab4;}")
 
         # Ação
         action_group = QGroupBox("Ação")
         action_group.setStyleSheet(_gb_style)
-        action_group.setFixedWidth(130)
+        action_group.setFixedWidth(120)
         ag_lay = QVBoxLayout(action_group)
-        ag_lay.setContentsMargins(8, 8, 8, 8)
+        ag_lay.setContentsMargins(6, 4, 6, 4)
+        ag_lay.setSpacing(0)
         self.combo_action = QComboBox()
         self.combo_action.addItems(["UPDATE", "INSERT", "DELETE"])
-        self.combo_action.setFixedHeight(32)
+        self.combo_action.setFixedHeight(30)
         self.combo_action.setStyleSheet("font-size:13px; font-weight:700;")
         ag_lay.addWidget(self.combo_action)
         ag_lay.addStretch()
@@ -352,9 +357,10 @@ class ExportDialog(QDialog):
         # Escopo
         scope_group = QGroupBox("Escopo")
         scope_group.setStyleSheet(_gb_style)
-        scope_group.setFixedWidth(230)
+        scope_group.setFixedWidth(220)
         sg_lay = QVBoxLayout(scope_group)
-        sg_lay.setContentsMargins(8, 8, 8, 8)
+        sg_lay.setContentsMargins(6, 4, 6, 4)
+        sg_lay.setSpacing(2)
         self.radio_selected = QCheckBox(
             f"Apenas selecionados ({len(self.selected_row_ids):,})")
         self.radio_all = QCheckBox(
@@ -368,12 +374,9 @@ class ExportDialog(QDialog):
         sg_lay.addStretch()
         config_lay.addWidget(scope_group)
 
-        # Destino — radio cards com indicador visual claro
+        # ── Destino — GridLayout para alinhar rb + engrenagem corretamente ──
         dest_group = QGroupBox("Destino")
         dest_group.setStyleSheet(_gb_style)
-        dg_lay = QVBoxLayout(dest_group)
-        dg_lay.setContentsMargins(6, 8, 6, 6)
-        dg_lay.setSpacing(4)
 
         cfg = AppConfig.get()
         exp_cfg = cfg.export
@@ -381,15 +384,15 @@ class ExportDialog(QDialog):
         default_dest = exp_cfg.get("default_destination", "local")
 
         local_dir_txt  = (exp_cfg.get('local_dir','') or '—')
-        local_dir_disp = local_dir_txt[:32] + "…" if len(local_dir_txt) > 32 else local_dir_txt
+        local_dir_disp = local_dir_txt[:28] + "…" if len(local_dir_txt) > 28 else local_dir_txt
         srv_dir_txt    = (exp_cfg.get('server_dir','') or '—')
-        srv_dir_disp   = srv_dir_txt[:32] + "…" if len(srv_dir_txt) > 32 else srv_dir_txt
+        srv_dir_disp   = srv_dir_txt[:28] + "…" if len(srv_dir_txt) > 28 else srv_dir_txt
         sftp_host      = sftp_cfg.get("host","") if sftp_cfg.get("enabled") else ""
 
-        self.rb_local = QRadioButton("📂  Salvar arquivo (diálogo)")
-        self.rb_dir   = QRadioButton(f"📁  Pasta: {local_dir_disp}")
-        self.rb_srv   = QRadioButton(f"🖥  Servidor: {srv_dir_disp}")
-        self.rb_sftp  = QRadioButton(f"☁  SFTP: {sftp_host or '(não configurado)'}")
+        self.rb_local = QRadioButton("📂  Salvar (diálogo)")
+        self.rb_dir   = QRadioButton(f"📁  {local_dir_disp}")
+        self.rb_srv   = QRadioButton(f"🖥  {srv_dir_disp}")
+        self.rb_sftp  = QRadioButton(f"☁  {sftp_host or 'SFTP (não configurado)'}")
 
         self._dest_group = QButtonGroup(self)
         self._dest_group.addButton(self.rb_local, 0)
@@ -402,17 +405,16 @@ class ExportDialog(QDialog):
         rb_map.get(default_dest, self.rb_local).setChecked(True)
 
         _dst_normal = (
-            f"QRadioButton{{color:{DST_TXT};font-size:12px;padding:5px 10px;"
-            f"border-radius:6px;border:1px solid {DST_BORDER};"
+            f"QRadioButton{{color:{DST_TXT};font-size:11px;padding:3px 8px;"
+            f"border-radius:5px;border:1px solid {DST_BORDER};"
             f"background:{DST_BG};font-weight:500;}}"
-            f"QRadioButton:hover{{background:{DST_HOVER};"
-            f"border-color:#6c7086;}}"
-            f"QRadioButton::indicator{{width:13px;height:13px;}}")
+            f"QRadioButton:hover{{background:{DST_HOVER};border-color:#6c7086;}}"
+            f"QRadioButton::indicator{{width:12px;height:12px;}}")
         _dst_checked = (
-            f"QRadioButton{{color:{DST_SEL_CLR};font-size:12px;padding:5px 10px;"
-            f"border-radius:6px;border:2px solid {DST_SEL_BD};"
+            f"QRadioButton{{color:{DST_SEL_CLR};font-size:11px;padding:3px 8px;"
+            f"border-radius:5px;border:2px solid {DST_SEL_BD};"
             f"background:{DST_SEL_BG};font-weight:700;}}"
-            f"QRadioButton::indicator{{width:13px;height:13px;}}")
+            f"QRadioButton::indicator{{width:12px;height:12px;}}")
 
         _dest_rbs = (self.rb_local, self.rb_dir, self.rb_srv, self.rb_sftp)
 
@@ -420,61 +422,74 @@ class ExportDialog(QDialog):
             for rb_ in _dest_rbs:
                 rb_.setStyleSheet(_dst_checked if rb_.isChecked() else _dst_normal)
 
-        # Estilo do botão de engrenagem (tema-aware)
+        # Estilo do botão de engrenagem
         if self._is_dark:
             _gear_style = (
-                "QToolButton{background:#313244;color:#6c7086;border:none;"
-                "border-radius:4px;padding:3px 5px;font-size:13px;}"
+                "QToolButton{background:#2a2a42;color:#6c7086;"
+                "border:1px solid #45475a;border-radius:4px;"
+                "padding:2px 4px;font-size:12px;}"
                 "QToolButton:hover{background:#45475a;color:#cdd6f4;}")
         else:
             _gear_style = (
-                "QToolButton{background:#dde1ea;color:#6070a0;border:none;"
-                "border-radius:4px;padding:3px 5px;font-size:13px;}"
-                "QToolButton:hover{background:#b8bcd0;color:#1a1a2e;}")
+                "QToolButton{background:#e0e4ed;color:#5060a0;"
+                "border:1px solid #b8bcd0;border-radius:4px;"
+                "padding:2px 4px;font-size:12px;}"
+                "QToolButton:hover{background:#4a90d9;color:white;border-color:#4a90d9;}")
 
-        def _make_gear_btn(settings_tab: str) -> "QToolButton":
-            """Cria botão ⚙ que abre o diálogo de configurações na aba correta."""
+        def _make_gear_btn(tab_idx: int) -> "QToolButton":
+            """Cria botão ⚙ que abre Configurações na aba correta."""
             btn = QToolButton()
             btn.setText("⚙")
-            btn.setToolTip("Abrir configurações")
-            btn.setFixedSize(26, 26)
+            btn.setFixedSize(24, 24)
+            btn.setToolTip("Abrir Configurações")
             btn.setStyleSheet(_gear_style)
-            def _open_settings(_checked=False, _tab=settings_tab):
+            def _open(_c=False, _i=tab_idx):
                 try:
                     from ui.settings_dialog import SettingsDialog
-                    dlg = SettingsDialog(self.parent() or self)
-                    # Tenta navegar para a aba correta
-                    if hasattr(dlg, 'tabs'):
-                        for i in range(dlg.tabs.count()):
-                            if _tab.lower() in dlg.tabs.tabText(i).lower():
-                                dlg.tabs.setCurrentIndex(i)
-                                break
+                    # Encontra a janela principal para passar como parent
+                    p = self.parent()
+                    while p and not hasattr(p, 'statusBar'):
+                        p = p.parent()
+                    dlg = SettingsDialog(p or self)
+                    dlg.tabs.setCurrentIndex(_i)
                     dlg.exec()
-                except Exception as e:
-                    logger.warning(f"Erro ao abrir configurações: {e}")
-            btn.clicked.connect(_open_settings)
+                except Exception as ex:
+                    logger.warning(f"Configurações: {ex}")
+            btn.clicked.connect(_open)
             return btn
 
-        # Adiciona radio buttons; Servidor e SFTP com botão ⚙
-        for i, rb in enumerate(_dest_rbs):
+        # Tab indices: 0=Geral, 1=Exportação, 2=SFTP, 3=API...
+        _TAB_EXPORT = 1
+        _TAB_SFTP   = 2
+
+        # GridLayout: col 0 = radio (stretch), col 1 = gear (fixed 28px)
+        dg_grid = QGridLayout(dest_group)
+        dg_grid.setContentsMargins(6, 14, 6, 4)
+        dg_grid.setHorizontalSpacing(4)
+        dg_grid.setVerticalSpacing(2)
+        dg_grid.setColumnStretch(0, 1)
+        dg_grid.setColumnMinimumWidth(1, 26)
+
+        # Linha 0: Local (sem engrenagem — usa placeholder transparente)
+        dg_grid.addWidget(self.rb_local, 0, 0, 1, 2)   # ocupa 2 colunas
+
+        # Linha 1: Pasta local (sem engrenagem)
+        dg_grid.addWidget(self.rb_dir, 1, 0, 1, 2)
+
+        # Linha 2: Servidor — com engrenagem → aba Exportação
+        dg_grid.addWidget(self.rb_srv, 2, 0)
+        dg_grid.addWidget(_make_gear_btn(_TAB_EXPORT), 2, 1)
+
+        # Linha 3: SFTP — com engrenagem → aba SFTP
+        dg_grid.addWidget(self.rb_sftp, 3, 0)
+        dg_grid.addWidget(_make_gear_btn(_TAB_SFTP), 3, 1)
+
+        for rb in _dest_rbs:
             rb.toggled.connect(_update_dst_styles)
-            if i in (2, 3):   # Servidor (2) e SFTP (3) têm engrenagem
-                tab_name = "sftp" if i == 3 else "exportação"
-                row = QHBoxLayout()
-                row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(4)
-                row.addWidget(rb, 1)
-                row.addWidget(_make_gear_btn(tab_name))
-                dg_lay.addLayout(row)
-            else:
-                dg_lay.addWidget(rb)
-
         _update_dst_styles()
-        dg_lay.addStretch()
-        config_lay.addWidget(dest_group)
-        config_lay.addStretch()
 
-        top_lay.addLayout(config_lay)
+        config_lay.addWidget(dest_group, 1)
+        top_lay.addWidget(config_container)
 
         # ── Separador ──
         sep = QFrame()
