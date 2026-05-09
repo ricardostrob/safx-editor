@@ -24,6 +24,8 @@ jobs:
 
       - name: Instalar dependências
         working-directory: SAFX_Editor
+        env:
+          PYTHONUTF8: "1"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -31,10 +33,14 @@ jobs:
 
       - name: Gerar assets de branding
         working-directory: SAFX_Editor
+        env:
+          PYTHONUTF8: "1"
         run: python packaging/branding/build_assets.py --inno-only
 
       - name: PyInstaller — gerar dist\SAFX_Editor
         working-directory: SAFX_Editor
+        env:
+          PYTHONUTF8: "1"
         run: pyinstaller --clean --noconfirm SAFX_Editor.spec
 
       - name: Inno Setup — gerar SAFX_Editor_Setup.exe
