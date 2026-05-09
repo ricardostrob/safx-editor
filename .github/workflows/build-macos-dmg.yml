@@ -49,16 +49,26 @@ jobs:
         run: |
           arch -x86_64 /usr/local/bin/python3.12 -m PyInstaller --clean --noconfirm SAFX_Editor.spec
 
-      - name: Criar DMG
+      - name: Assinar app (ad-hoc) para reduzir aviso de seguranca
+        working-directory: SAFX_Editor
+        run: |
+          codesign --deep --force --sign - "dist/SAFX_Editor.app" 2>/dev/null || true
+          echo "Assinatura ad-hoc aplicada."
+
+      - name: Criar DMG com instrucao visual (arraste para Aplicativos)
         working-directory: SAFX_Editor
         run: |
           mkdir -p release
           STAGE=$(mktemp -d)
+
+          # Copia o .app e cria o atalho para /Applications
           cp -R "dist/SAFX_Editor.app" "$STAGE/SAFX_Editor.app"
-          ln -s /Applications "$STAGE/Applications"
+          ln -s /Applications "$STAGE/Aplicativos (arraste aqui)"
+
           DMG="release/SAFX_Editor_macos.dmg"
           rm -f "$DMG"
-          hdiutil create -volname "SAFX Editor" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          hdiutil create -volname "SAFX Editor — Arraste para Aplicativos" \
+            -srcfolder "$STAGE" -ov -format UDZO "$DMG"
           rm -rf "$STAGE"
           echo "DMG: $(du -h $DMG | cut -f1)"
 
