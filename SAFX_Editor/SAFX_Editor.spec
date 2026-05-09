@@ -14,8 +14,8 @@ ROOT = Path(SPECPATH)
 # UPX desligado: causa falhas no macOS e inconsistencias no Windows.
 _USE_UPX = False
 
-# universal2 = funciona em Intel (x86_64) E Apple Silicon (arm64) no mesmo binario.
-_TARGET_ARCH = "universal2" if sys.platform == "darwin" else None
+# Arch definida pelo interpretador Python usado: x86_64 via Rosetta ou arm64 nativo.
+_TARGET_ARCH = None
 
 hiddenimports = collect_submodules("ui") + collect_submodules("core")
 hiddenimports += [
