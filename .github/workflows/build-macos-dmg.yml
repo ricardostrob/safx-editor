@@ -44,7 +44,7 @@ jobs:
         env:
           PYTHONUTF8: "1"
         run: |
-          pyinstaller --clean --noconfirm --target-arch universal2 SAFX_Editor.spec
+          pyinstaller --clean --noconfirm SAFX_Editor.spec
 
       - name: Criar DMG com hdiutil
         working-directory: SAFX_Editor

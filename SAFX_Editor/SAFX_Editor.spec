@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller — SAFX Editor (Windows .exe + pasta / macOS .app).
+PyInstaller - SAFX Editor (Windows .exe + pasta / macOS .app).
 Executar na pasta SAFX_Editor: pyinstaller --clean --noconfirm SAFX_Editor.spec
 """
 import sys
@@ -10,8 +10,12 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 ROOT = Path(SPECPATH)
-# UPX no macOS costuma falhar ou gerar .app inválido; no Windows também desligamos por consistência.
+
+# UPX desligado: causa falhas no macOS e inconsistencias no Windows.
 _USE_UPX = False
+
+# universal2 = funciona em Intel (x86_64) E Apple Silicon (arm64) no mesmo binario.
+_TARGET_ARCH = "universal2" if sys.platform == "darwin" else None
 
 hiddenimports = collect_submodules("ui") + collect_submodules("core")
 hiddenimports += [
@@ -65,7 +69,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=_TARGET_ARCH,
     codesign_identity=None,
     entitlements_file=None,
 )
@@ -82,7 +86,6 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
-    # Nome sem espaços evita falhas em hdiutil / scripts.
     app = BUNDLE(
         coll,
         name="SAFX_Editor.app",
