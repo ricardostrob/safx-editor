@@ -1,0 +1,71 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependências
+        working-directory: SAFX_Editor
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r packaging/requirements-build.txt
+
+      - name: Gerar assets de branding
+        working-directory: SAFX_Editor
+        run: python packaging/branding/build_assets.py --inno-only
+
+      - name: PyInstaller — gerar dist\SAFX_Editor
+        working-directory: SAFX_Editor
+        run: pyinstaller --clean --noconfirm SAFX_Editor.spec
+
+      - name: Inno Setup — gerar SAFX_Editor_Setup.exe
+        working-directory: SAFX_Editor/packaging
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc SAFX_Editor_installer.iss
+        shell: pwsh
+
+      - name: Upload para Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "SAFX Editor ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          files: SAFX_Editor/release/SAFX_Editor_Setup.exe
+          body: |
+            ## SAFX Editor ${{ github.ref_name }}
+
+            ### Instalar no Windows
+            1. Descarregue **SAFX_Editor_Setup.exe**
+            2. Execute e clique **Avançar** até concluir
+            3. Abra pelo atalho no Ambiente de Trabalho
+
+            ### Instalar no Mac (Intel 2015–2020)
+            1. Descarregue **SAFX_Editor_macos.dmg**
+            2. Abra com duplo clique
+            3. Arraste **SAFX_Editor** para a pasta **Aplicativos**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

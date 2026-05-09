@@ -30,18 +30,22 @@ jobs:
       - name: Cria Release e faz upload do DMG
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: "SAFX Editor v1.0.2 (Intel Mac)"
+          tag_name: ${{ github.ref_name }}
+          name: "SAFX Editor ${{ github.ref_name }}"
           draft: false
           prerelease: false
           files: SAFX_Editor/release/SAFX_Editor_macos.dmg
           body: |
-            ## SAFX Editor v1.0.0 — macOS
+            ## SAFX Editor ${{ github.ref_name }}
 
-            ### Como instalar no Mac
+            ### Instalar no Mac (Intel 2015–2020)
             1. Descarregue **SAFX_Editor_macos.dmg**
             2. Abra com duplo clique
             3. Arraste **SAFX_Editor** para a pasta **Aplicativos**
             4. Abra pelo Launchpad
+
+            ### Instalar no Windows
+            1. Descarregue **SAFX_Editor_Setup.exe**
+            2. Execute e clique **Avançar** até concluir
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
