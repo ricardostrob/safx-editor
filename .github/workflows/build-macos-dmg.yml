@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   dmg:
-    runs-on: macos-14
+    # macos-13 = runner Intel x86_64 (compatível com MacBook 2018 e anteriores)
+    # macos-14 = runner Apple Silicon ARM (INCOMPATÍVEL com Intel Macs)
+    runs-on: macos-13
     timeout-minutes: 60
 
     steps:
@@ -28,8 +30,8 @@ jobs:
       - name: Cria Release e faz upload do DMG
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: "SAFX Editor v1.0.0"
+          tag_name: v1.0.2
+          name: "SAFX Editor v1.0.2 (Intel Mac)"
           draft: false
           prerelease: false
           files: SAFX_Editor/release/SAFX_Editor_macos.dmg
