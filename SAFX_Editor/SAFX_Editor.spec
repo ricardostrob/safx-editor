@@ -86,9 +86,14 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
+    # Usa .icns se existir (gerado pelo workflow), senao usa .png como fallback
+    _icns = ROOT / "resources" / "app_icon.icns"
+    _icon_mac = str(_icns) if _icns.is_file() else str(ROOT / "resources" / "app_icon.png")
+
     app = BUNDLE(
         coll,
         name="SAFX_Editor.app",
+        icon=_icon_mac,
         bundle_identifier="com.adejo.safxeditor",
         version="1.0.0",
         info_plist={
