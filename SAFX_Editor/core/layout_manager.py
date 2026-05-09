@@ -157,6 +157,10 @@ class LayoutManager:
                 )
                 fields.append(fd)
 
+            # Formato alternativo (ESTRUTURA/estrutura_md — tabela GitHub sem backticks)
+            if not fields:
+                fields = self._parse_md_github_table(content)
+
             # Remove duplicatas (mesmo campo)
             seen = set()
             unique_fields = []
@@ -178,6 +182,80 @@ class LayoutManager:
         except Exception as e:
             logger.error(f"Erro ao parsear {filepath}: {e}")
             return None
+
+    def _parse_md_github_table(self, content: str) -> List[FieldDefinition]:
+        """
+        Formato de tabela Markdown usado em ESTRUTURA/estrutura_md, ex.:
+        | Campo | Tipo | Tamanho | Precisão | Escala | Nulo | ID | Padrão |
+        | COD_EMPRESA | VARCHAR2 | 3 | - | - | ✓ | 1 | - |
+        | SEQ_ARQ | NUMBER | 22 | 20.0 | 0.0 | ✓ | 147 | - |
+        """
+        fields: List[FieldDefinition] = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith('|'):
+                continue
+            inner = stripped[1:-1] if stripped.endswith('|') else stripped[1:]
+            cells = [c.strip() for c in inner.split('|')]
+            if len(cells) < 3:
+                continue
+            col0 = cells[0]
+            if not col0 or set(col0) <= {'-', ':', ' '}:
+                continue
+            if col0.lower() in ('campo', 'field', 'nome', 'name'):
+                continue
+            name = col0
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', name):
+                continue
+
+            type_str = cells[1] if len(cells) > 1 else 'VARCHAR2'
+            size_cell = cells[2] if len(cells) > 2 else '50'
+            prec = cells[3] if len(cells) > 3 else '-'
+            scale = cells[4] if len(cells) > 4 else '-'
+            nulo = cells[5] if len(cells) > 5 else ''
+            item_raw = cells[6] if len(cells) > 6 else '0'
+            try:
+                item_num = int(float(item_raw))
+            except ValueError:
+                item_num = len(fields) + 1
+
+            def _norm_dash(s: str) -> str:
+                return (s or '').replace('−', '-').replace('—', '-').strip()
+
+            prec = _norm_dash(prec)
+            scale = _norm_dash(scale)
+
+            typ_u = type_str.upper()
+            if typ_u == 'NUMBER' and prec not in ('-', '') and scale not in ('-', ''):
+                try:
+                    sz = int(float(size_cell))
+                    sc = int(float(scale))
+                    size_str = f"{sz:03d}V{sc:03d}"
+                except ValueError:
+                    size_str = str(size_cell).strip()
+            else:
+                try:
+                    sz = int(float(size_cell))
+                    size_str = str(sz)
+                except ValueError:
+                    size_str = (size_cell or '50').strip()
+
+            # Coluna "Nulo": ✓ costuma indicar que aceita NULL (campo não obrigatório).
+            n_st = (nulo or '').strip()
+            if '✓' in n_st or '√' in n_st or '✔' in n_st:
+                mandatory_str = 'NÃO'
+            elif n_st.upper() in ('N', 'NÃO', 'NAO', 'NO'):
+                mandatory_str = 'SIM'
+            else:
+                mandatory_str = 'NÃO'
+
+            desc = name
+            fd = FieldDefinition.from_parts(
+                item_num, name, type_str, size_str, mandatory_str, desc
+            )
+            fields.append(fd)
+
+        return fields
 
     def clear_cache(self):
         self._cache.clear()

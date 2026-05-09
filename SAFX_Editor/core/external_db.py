@@ -265,7 +265,7 @@ class ExternalDBManager:
         kwargs varia por tipo:
           sqlite: path
           postgres/supabase: host, port, dbname, user, password  (ou dsn)
-          oracle: host, port, service_name, user, password
+          oracle: host, port, user, password e um de: service_name, dbname, sid
           mysql: host, port, database, user, password
         """
         self._db_type = db_type
@@ -288,12 +288,32 @@ class ExternalDBManager:
                         if k in kwargs})
 
             elif db_type == 'oracle':
-                import cx_Oracle
-                dsn = cx_Oracle.makedsn(
-                    kwargs['host'], kwargs.get('port', 1521),
-                    service_name=kwargs.get('service_name', ''))
-                self._conn = cx_Oracle.connect(
-                    kwargs['user'], kwargs['password'], dsn)
+                try:
+                    import oracledb as _ora  # type: ignore
+                except ImportError:
+                    import cx_Oracle as _ora  # type: ignore
+                # service_name (UI «Database»); aceita dbname por compat. com chamadas antigas
+                svc = (kwargs.get('service_name') or kwargs.get('dbname') or '').strip()
+                sid = (kwargs.get('sid') or '').strip()
+                if not svc and not sid:
+                    return False, (
+                        "Oracle: informe o Service Name ou o SID no campo «Database» "
+                        "(erro típico sem isso: ORA-12504 / listener recusou a conexão).")
+                port = int(kwargs.get('port') or 1521)
+                if sid and not svc:
+                    dsn = _ora.makedsn(kwargs['host'], port, sid=sid)
+                else:
+                    dsn = _ora.makedsn(kwargs['host'], port, service_name=svc)
+                if _ora.__name__ == 'cx_Oracle':
+                    self._conn = _ora.connect(
+                        kwargs['user'], kwargs['password'], dsn,
+                        encoding='UTF-8')
+                else:
+                    self._conn = _ora.connect(
+                        user=kwargs['user'],
+                        password=kwargs['password'],
+                        dsn=dsn,
+                    )
 
             elif db_type == 'mysql':
                 import pymysql

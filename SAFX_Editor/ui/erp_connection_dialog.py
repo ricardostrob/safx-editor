@@ -14,12 +14,12 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
     QTextEdit, QCheckBox, QSpinBox, QMessageBox,
     QProgressBar, QFrame, QSplitter, QListWidget,
-    QListWidgetItem, QSizePolicy, QApplication
+    QListWidgetItem, QSizePolicy, QApplication, QInputDialog,
 )
 
 from core.erp_connector import (
     ERPConnectionConfig, CONNECTOR_LABELS, CONNECTOR_PORTS,
-    get_connector, check_dependencies, ERPConnectorError
+    get_connector, check_dependencies, ERPConnectorError, OracleConnector,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,9 @@ class ERPConnectionDialog(QDialog):
         except Exception:
             pass
 
+        from ui.window_utils import enable_dialog_min_max
+        enable_dialog_min_max(self)
+
         self._setup_ui()
         self._check_deps()
 
@@ -101,14 +104,23 @@ class ERPConnectionDialog(QDialog):
         hl.addWidget(self.lbl_dep_status)
         root.addWidget(hdr)
 
+        from ui.window_utils import wrap_widget_in_scroll_area
+
         # ── Tabs: Conexão | Mapeamento | Importar ──
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
         root.addWidget(tabs, 1)
 
-        tabs.addTab(self._build_conn_tab(), "  🔌 Conexão  ")
-        tabs.addTab(self._build_mapping_tab(), "  🗺 Mapeamento  ")
-        tabs.addTab(self._build_import_tab(), "  ⬇ Importar  ")
+        tabs.addTab(wrap_widget_in_scroll_area(self._build_conn_tab(), tabs),
+                    "  🔌 Conexão  ")
+        tabs.addTab(wrap_widget_in_scroll_area(self._build_mapping_tab(), tabs),
+                    "  🗺 Mapeamento  ")
+        tabs.addTab(wrap_widget_in_scroll_area(self._build_import_tab(), tabs),
+                    "  ⬇ Importar  ")
+
+        self._main_tabs = tabs
+        tabs.currentChanged.connect(self._on_erp_tab_changed)
+        self._sync_import_combo_from_mapping()
 
         # ── Rodapé ──
         ftr = QWidget()
@@ -281,11 +293,43 @@ class ERPConnectionDialog(QDialog):
 
         info = QLabel(
             "ℹ  Configure o nome da tabela no banco/ERP para cada tabela SAFX.\n"
-            "Deixe em branco para usar o nome padrão da SAFX (ex: SAFX07).\n"
+            "Use «+ Adicionar tabela SAFX» para incluir códigos que não estão na lista.\n"
+            "Deixe «Nome no Banco» em branco para usar o mesmo nome da SAFX.\n"
             "Você também pode escrever uma query SQL/endpoint personalizada.")
         info.setStyleSheet("color:#a6adc8;font-size:12px;")
         info.setWordWrap(True)
         lay.addWidget(info)
+
+        row_tool = QHBoxLayout()
+        _btn_style = (
+            "QPushButton{background:#1e3a5a;color:#89b4fa;border:1px solid #313244;"
+            "border-radius:5px;padding:6px 12px;font-size:12px;font-weight:600;}"
+            "QPushButton:hover{background:#2a4a6a;color:#cdd6f4;}")
+        btn_add = QPushButton("+ Adicionar tabela SAFX…")
+        btn_add.setToolTip(
+            "Nova linha no mapeamento (ex.: SAFX07, SAFX_ORI_01, tabela Z do SAP).")
+        btn_add.setStyleSheet(_btn_style)
+        btn_add.clicked.connect(self._mapping_add_custom_row)
+        row_tool.addWidget(btn_add)
+        btn_rem = QPushButton("Remover linha selecionada")
+        btn_rem.setToolTip("Remove a linha selecionada na grade.")
+        btn_rem.setStyleSheet(_btn_style)
+        btn_rem.clicked.connect(self._mapping_remove_selected_row)
+        row_tool.addWidget(btn_rem)
+
+        self._btn_list_oracle = QPushButton(
+            "📋  Listar tabelas Oracle (schema do usuário)…")
+        self._btn_list_oracle.setToolTip(
+            "Usa host, porta, service name, usuário e senha da aba Conexão.\n"
+            "Lista USER_TABLES (tabelas do próprio usuário). Para tabelas de "
+            "outro owner (ex.: SAPSR3), use a coluna «Query personalizada» ou "
+            "um usuário com acesso a esse schema.")
+        self._btn_list_oracle.setStyleSheet(_btn_style)
+        self._btn_list_oracle.clicked.connect(self._browse_oracle_tables_for_mapping)
+        row_tool.addWidget(self._btn_list_oracle)
+        row_tool.addStretch()
+        lay.addLayout(row_tool)
+        self._sync_oracle_list_button_visibility()
 
         self.tbl_mapping = QTableWidget(0, 3)
         self.tbl_mapping.setHorizontalHeaderLabels(
@@ -312,12 +356,231 @@ class ERPConnectionDialog(QDialog):
             '702','992','993','2089','2098','2099']]
         self.tbl_mapping.setRowCount(len(known))
         for i, safx in enumerate(known):
-            self.tbl_mapping.setItem(i, 0, QTableWidgetItem(safx))
-            self.tbl_mapping.setItem(i, 1, QTableWidgetItem(''))
-            self.tbl_mapping.setItem(i, 2, QTableWidgetItem(''))
+            self.tbl_mapping.setItem(i, 0, self._mapping_editable_item(safx))
+            self.tbl_mapping.setItem(i, 1, self._mapping_editable_item(''))
+            self.tbl_mapping.setItem(i, 2, self._mapping_editable_item(''))
+        self.tbl_mapping.itemChanged.connect(self._on_mapping_safx_cell_changed)
 
         lay.addWidget(self.tbl_mapping, 1)
         return w
+
+    @staticmethod
+    def _mapping_editable_item(text: str) -> QTableWidgetItem:
+        it = QTableWidgetItem(text)
+        it.setFlags(
+            it.flags()
+            | Qt.ItemFlag.ItemIsEditable
+            | Qt.ItemFlag.ItemIsSelectable
+            | Qt.ItemFlag.ItemIsEnabled)
+        return it
+
+    def _mapping_add_custom_row(self):
+        text, ok = QInputDialog.getText(
+            self, "Nova tabela SAFX",
+            "Nome da tabela SAFX a mapear (ex.: SAFX07, SAFX_ORI_01):",
+            QLineEdit.EchoMode.Normal,
+            "")
+        if not ok:
+            return
+        name = text.strip().upper().replace(' ', '_')
+        if not name:
+            return
+        for i in range(self.tbl_mapping.rowCount()):
+            c0 = self.tbl_mapping.item(i, 0)
+            if c0 and c0.text().strip().upper() == name:
+                QMessageBox.information(
+                    self, "Duplicada",
+                    f"A tabela «{name}» já existe na grade de mapeamento.")
+                return
+        r = self.tbl_mapping.rowCount()
+        self.tbl_mapping.blockSignals(True)
+        self.tbl_mapping.insertRow(r)
+        self.tbl_mapping.setItem(r, 0, self._mapping_editable_item(name))
+        self.tbl_mapping.setItem(r, 1, self._mapping_editable_item(''))
+        self.tbl_mapping.setItem(r, 2, self._mapping_editable_item(''))
+        self.tbl_mapping.blockSignals(False)
+        self.tbl_mapping.selectRow(r)
+        self._sync_import_combo_from_mapping()
+
+    def _mapping_remove_selected_row(self):
+        r = self.tbl_mapping.currentRow()
+        if r < 0:
+            QMessageBox.information(
+                self, "Remover linha",
+                "Selecione uma linha na grade de mapeamento para remover.")
+            return
+        self.tbl_mapping.removeRow(r)
+        self._sync_import_combo_from_mapping()
+
+    def _on_erp_tab_changed(self, index: int):
+        if index == 2:
+            self._sync_import_combo_from_mapping()
+
+    def _sync_import_combo_from_mapping(self):
+        if not hasattr(self, 'combo_import_table'):
+            return
+        names: List[str] = []
+        seen = set()
+        for i in range(self.tbl_mapping.rowCount()):
+            it = self.tbl_mapping.item(i, 0)
+            if not it:
+                continue
+            t = it.text().strip()
+            if not t:
+                continue
+            key = t.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(t)
+        names.sort(key=lambda x: x.upper())
+        cur = self.combo_import_table.currentText().strip()
+        self.combo_import_table.blockSignals(True)
+        self.combo_import_table.clear()
+        for n in names:
+            self.combo_import_table.addItem(n)
+        self.combo_import_table.blockSignals(False)
+        if not names:
+            self.combo_import_table.setEditText(cur)
+            return
+        pick = -1
+        for i in range(self.combo_import_table.count()):
+            if self.combo_import_table.itemText(i).upper() == cur.upper():
+                pick = i
+                break
+        if pick >= 0:
+            self.combo_import_table.setCurrentIndex(pick)
+        else:
+            self.combo_import_table.setEditText(cur if cur else names[0])
+
+    def _on_mapping_safx_cell_changed(self, item: QTableWidgetItem):
+        if item.column() == 0:
+            self._sync_import_combo_from_mapping()
+
+    def _sync_oracle_list_button_visibility(self):
+        btn = getattr(self, '_btn_list_oracle', None)
+        if btn is None:
+            return
+        key = self.combo_type.currentData()
+        btn.setVisible(key == 'oracle')
+
+    def _browse_oracle_tables_for_mapping(self):
+        cfg = self._build_cfg()
+        if cfg.type != 'oracle':
+            QMessageBox.information(
+                self, "Listagem",
+                "A listagem automática de tabelas está disponível apenas para "
+                "Oracle Database.")
+            return
+        if not check_dependencies().get('oracle'):
+            QMessageBox.warning(
+                self, "Driver Oracle ausente",
+                "Instale um dos drivers no mesmo Python do SAFX Editor:\n\n"
+                "  pip install oracledb\n\n"
+                "(recomendado no Windows — modo «thin» costuma dispensar "
+                "Oracle Instant Client)\n\n"
+                "Alternativa:\n  pip install cx_Oracle\n\n"
+                "Reinicie o aplicativo após instalar.")
+            return
+        if (not cfg.host.strip() or not (cfg.database or '').strip()
+                or not cfg.username.strip()):
+            QMessageBox.warning(
+                self, "Dados incompletos",
+                "Na aba Conexão, preencha host, database (service name) e usuário.")
+            return
+
+        row = self.tbl_mapping.currentRow()
+        if row < 0:
+            QMessageBox.information(
+                self, "Linha do mapeamento",
+                "Selecione uma linha na tabela de mapeamento; a coluna "
+                "«Nome no Banco/ERP» será preenchida com o nome escolhido.")
+            return
+
+        try:
+            conn = OracleConnector(cfg).connect()
+        except Exception as e:
+            QMessageBox.critical(self, "Conexão Oracle", str(e))
+            return
+
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT table_name FROM ("
+                "  SELECT table_name FROM user_tables ORDER BY table_name"
+                ") WHERE ROWNUM <= 8000"
+            )
+            names = [r[0] for r in cur.fetchall()]
+        except Exception as e:
+            QMessageBox.critical(self, "Consulta Oracle", str(e))
+            return
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if not names:
+            QMessageBox.information(
+                self, "Nenhuma tabela",
+                "Nenhuma entrada em USER_TABLES para este usuário.")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Tabelas no schema Oracle (usuário atual)")
+        dlg.setMinimumSize(440, 500)
+        vl = QVBoxLayout(dlg)
+        safx_cell = self.tbl_mapping.item(row, 0)
+        safx_name = safx_cell.text() if safx_cell else "?"
+        hint = QLabel(
+            "Duplo clique em um nome ou clique em «Aplicar» para preencher "
+            f"«Nome no Banco/ERP» na linha {safx_name}."
+        )
+        hint.setWordWrap(True)
+        vl.addWidget(hint)
+        fil = QLineEdit()
+        fil.setPlaceholderText("Filtrar por nome…")
+        vl.addWidget(fil)
+        lst = QListWidget()
+        for n in names:
+            lst.addItem(n)
+        lst.setAlternatingRowColors(True)
+        vl.addWidget(lst, 1)
+
+        def _filter_q():
+            q = fil.text().strip().upper()
+            for i in range(lst.count()):
+                it = lst.item(i)
+                it.setHidden(bool(q) and q not in it.text().upper())
+
+        fil.textChanged.connect(lambda _t: _filter_q())
+
+        def _apply_sel():
+            items = lst.selectedItems()
+            if not items:
+                QMessageBox.warning(dlg, "Seleção", "Selecione uma tabela na lista.")
+                return
+            name = items[0].text()
+            c1 = self.tbl_mapping.item(row, 1)
+            if not c1:
+                c1 = self._mapping_editable_item('')
+                self.tbl_mapping.setItem(row, 1, c1)
+            c1.setText(name)
+            dlg.accept()
+
+        lst.itemDoubleClicked.connect(lambda _it: _apply_sel())
+
+        bb = QHBoxLayout()
+        b_apply = QPushButton("Aplicar à linha do mapeamento")
+        b_apply.clicked.connect(_apply_sel)
+        b_close = QPushButton("Fechar")
+        b_close.clicked.connect(dlg.reject)
+        bb.addWidget(b_apply)
+        bb.addStretch()
+        bb.addWidget(b_close)
+        vl.addLayout(bb)
+
+        dlg.exec()
 
     # ── Aba Importar ──
 
@@ -415,13 +678,15 @@ class ERPConnectionDialog(QDialog):
             self.lbl_driver_status.setStyleSheet("color:#a6e3a1;font-size:11px;")
         else:
             driver_pkgs = {
-                'oracle': 'cx_Oracle', 'postgres': 'psycopg2',
+                'oracle': 'oracledb (recomendado) ou cx_Oracle',
+                'postgres': 'psycopg2',
                 'supabase_rest': 'requests', 'mysql': 'pymysql',
                 'totvs_rest': 'requests', 'sap_rfc': 'pyrfc', 'odbc': 'pyodbc'
             }
             pkg = driver_pkgs.get(key, '?')
             self.lbl_driver_status.setText(f"⚠ pip install {pkg}")
             self.lbl_driver_status.setStyleSheet("color:#f9e2af;font-size:11px;")
+        self._sync_oracle_list_button_visibility()
 
     def _build_cfg(self) -> ERPConnectionConfig:
         cfg = ERPConnectionConfig()

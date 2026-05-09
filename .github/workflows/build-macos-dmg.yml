@@ -1,0 +1,50 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build DMG
+        run: python3 SAFX_Editor/build_dmg_mac.py
+
+      - name: Upload como artefacto (download direto)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAFX_Editor_macos
+          path: SAFX_Editor/release/SAFX_Editor_macos.dmg
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Criar Release no GitHub (quando for tag v*)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SAFX_Editor/release/SAFX_Editor_macos.dmg
+          name: "SAFX Editor ${{ github.ref_name }}"
+          body: |
+            ## SAFX Editor ${{ github.ref_name }}
+
+            ### Instalar no Mac
+            1. Descarregue **SAFX_Editor_macos.dmg**
+            2. Abra o ficheiro com duplo clique
+            3. Arraste **SAFX_Editor** para **Aplicativos**
+            4. Abra pelo Launchpad
+
+            ### Instalar no Windows
+            Descarregue e execute **SAFX_Editor_Setup.exe**

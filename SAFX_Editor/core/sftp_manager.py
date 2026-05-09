@@ -2,6 +2,7 @@
 Gerenciador SFTP para envio de arquivos exportados.
 Usa paramiko para conexão SSH/SFTP.
 """
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -46,14 +47,20 @@ class SFTPManager:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
+            t = max(15, int(self.timeout))
             connect_kwargs = {
                 "hostname": self.host,
                 "port": self.port,
                 "username": self.username,
-                "timeout": self.timeout,
+                "timeout": t,
                 "look_for_keys": False,
                 "allow_agent": False,
             }
+            sig = inspect.signature(paramiko.SSHClient.connect)
+            if "banner_timeout" in sig.parameters:
+                connect_kwargs["banner_timeout"] = t
+            if "auth_timeout" in sig.parameters:
+                connect_kwargs["auth_timeout"] = t
 
             if self.key_path and os.path.exists(self.key_path):
                 connect_kwargs["key_filename"] = self.key_path
@@ -67,11 +74,46 @@ class SFTPManager:
             client.connect(**connect_kwargs)
             self._client = client
             self._sftp = client.open_sftp()
+            tr = client.get_transport()
+            if tr:
+                tr.set_keepalive(max(30, t))
             logger.info(f"SFTP conectado em {self.host}:{self.port}")
             return True, f"Conectado ao SFTP {self.host}:{self.port}"
 
+        except paramiko.AuthenticationException as e:
+            logger.error(f"Erro SFTP (auth): {e}")
+            return False, (
+                "Erro de conexao SFTP: autenticação recusada pelo servidor.\n\n"
+                "O «Testar Conexão» usa os dados desta janela; a exportação usa o perfil "
+                "já salvo. Clique em «Salvar e Fechar» após preencher a senha, e em "
+                "Configurações > Exportação confira qual perfil SFTP está selecionado "
+                "para o envio.")
+        except OSError as e:
+            logger.error(f"Erro SFTP (rede): {e}")
+            err = str(e)
+            if getattr(e, "winerror", None) == 10060 or "10060" in err or (
+                    "timed out" in err.lower()):
+                return False, (
+                    f"Erro de conexao SFTP: tempo esgotado ao contatar o servidor.\n{err}\n\n"
+                    "Verifique VPN, rede e firewall. Se o teste rápido funciona, aumente "
+                    f"o timeout (atual {self.timeout}s) em Configurações > SFTP e tente "
+                    "novamente.")
+            return False, f"Erro de conexao SFTP: {e}"
         except Exception as e:
             logger.error(f"Erro SFTP: {e}")
+            err = str(e)
+            if "Authentication failed" in err or "authentication failed" in err.lower():
+                return False, (
+                    "Erro de conexao SFTP: autenticação recusada pelo servidor.\n\n"
+                    "O «Testar Conexão» usa os dados desta janela; a exportação usa o perfil "
+                    "já salvo. Clique em «Salvar e Fechar» após preencher a senha, e em "
+                    "Configurações > Exportação confira qual perfil SFTP está selecionado "
+                    "para o envio.")
+            if "10060" in err or "timed out" in err.lower():
+                return False, (
+                    f"Erro de conexao SFTP: tempo esgotado.\n{err}\n\n"
+                    "Verifique VPN, rede e firewall. Aumente o timeout em Configurações > "
+                    f"SFTP (atual {self.timeout}s) se a ligação for lenta.")
             return False, f"Erro de conexao SFTP: {e}"
 
     def disconnect(self):
@@ -114,6 +156,10 @@ class SFTPManager:
             self._ensure_remote_dir(self.remote_path)
 
             file_size = local.stat().st_size
+            ch = self._sftp.get_channel()
+            if ch:
+                # Upload pode demorar mais que o connect TCP
+                ch.settimeout(max(120.0, float(self.timeout) * 10))
 
             def _progress(transferred: int, total: int):
                 if progress_callback:
@@ -127,7 +173,16 @@ class SFTPManager:
 
         except Exception as e:
             logger.error(f"Erro no upload SFTP: {e}")
+            err = str(e)
+            if getattr(e, "winerror", None) == 10060 or "10060" in err or (
+                    "timed out" in err.lower()):
+                return False, (
+                    f"Erro no upload: tempo esgotado durante a transferência.\n{err}\n\n"
+                    f"Aumente o timeout em Configurações > SFTP (atual {self.timeout}s) ou "
+                    "verifique rede/VPN.")
             return False, f"Erro no upload: {e}"
+        finally:
+            self.disconnect()
 
     def _ensure_remote_dir(self, remote_dir: str):
         """Cria diretório remoto recursivamente se não existir."""

@@ -64,10 +64,23 @@ def _test_import(module_name: str) -> bool:
         return False
 
 
-class OracleConnector:
-    """Conecta ao Oracle DB via cx_Oracle."""
+def _oracle_driver():
+    """
+    Preferência: oracledb (modo thin, costuma dispensar Oracle Instant Client no Windows).
+    Fallback: cx_Oracle (muitas vezes exige Instant Client instalado e no PATH).
+    """
+    try:
+        import oracledb as drv  # type: ignore
+        return drv, "oracledb"
+    except ImportError:
+        import cx_Oracle as drv  # type: ignore
+        return drv, "cx_Oracle"
 
-    DRIVER = 'cx_Oracle'
+
+class OracleConnector:
+    """Conecta ao Oracle DB via oracledb (preferido) ou cx_Oracle."""
+
+    DRIVER = 'oracledb'  # referência principal; is_available aceita cx_Oracle também
     DISPLAY = 'Oracle Database'
 
     def __init__(self, cfg: ERPConnectionConfig):
@@ -75,20 +88,26 @@ class OracleConnector:
 
     @classmethod
     def is_available(cls) -> bool:
-        return _test_import(cls.DRIVER)
+        return _test_import('oracledb') or _test_import('cx_Oracle')
 
     def connect(self):
-        import cx_Oracle  # noqa
-        dsn = cx_Oracle.makedsn(
+        drv, name = _oracle_driver()
+        dsn = drv.makedsn(
             self.cfg.host,
             self.cfg.port or 1521,
             service_name=self.cfg.database or self.cfg.dsn
         )
-        return cx_Oracle.connect(
+        if name == 'cx_Oracle':
+            return drv.connect(
+                user=self.cfg.username,
+                password=self.cfg.password,
+                dsn=dsn,
+                encoding=self.cfg.encoding,
+            )
+        return drv.connect(
             user=self.cfg.username,
             password=self.cfg.password,
             dsn=dsn,
-            encoding=self.cfg.encoding
         )
 
     def fetch_safx_table(self, table_name: str,
@@ -477,7 +496,7 @@ CONNECTORS = {
 }
 
 CONNECTOR_LABELS = {
-    'oracle':        'Oracle Database (cx_Oracle)',
+    'oracle':        'Oracle Database (oracledb / cx_Oracle)',
     'postgres':      'PostgreSQL (psycopg2)',
     'supabase':      'Supabase (PostgreSQL)',
     'supabase_rest': 'Supabase (REST API)',
@@ -505,7 +524,7 @@ def get_connector(cfg: ERPConnectionConfig):
 def check_dependencies() -> Dict[str, bool]:
     """Verifica quais drivers estão disponíveis."""
     return {
-        'oracle':        _test_import('cx_Oracle'),
+        'oracle':        _test_import('oracledb') or _test_import('cx_Oracle'),
         'postgres':      _test_import('psycopg2'),
         'supabase_rest': _test_import('requests'),
         'mysql':         _test_import('pymysql'),

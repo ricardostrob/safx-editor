@@ -1,0 +1,3 @@
+# Ferramentas só na máquina de build (não no requirements do cliente)
+pyinstaller>=6.3.0
+pillow>=10.0.0

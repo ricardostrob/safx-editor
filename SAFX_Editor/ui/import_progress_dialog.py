@@ -72,10 +72,12 @@ class ImportProgressDialog(QDialog):
 
         self.setWindowTitle("Importando SAFX")
         self.setWindowFlags(
-            Qt.WindowType.Dialog |
-            Qt.WindowType.CustomizeWindowHint |
-            Qt.WindowType.WindowTitleHint |
-            Qt.WindowType.WindowCloseButtonHint
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowCloseButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
         )
         self.setMinimumSize(520, 320)
         self.setModal(True)

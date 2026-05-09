@@ -1,6 +1,14 @@
 # SAFX Editor — .gitignore
 # Adejo Tecnologia / TecTex
 
+# Pastas grandes desnecessárias para o build
+ESTRUTURA/
+DIST/
+Windons/
+Macbook/*.dmg
+tools/
+publicar_no_github.ps1
+
 # ── Python ──────────────────────────────────────────
 __pycache__/
 *.py[cod]
@@ -48,6 +56,15 @@ logs/
 # ── Build / Dist ─────────────────────────────────────
 build/
 dist_pyinstaller/
+SAFX_Editor/build/
+SAFX_Editor/dist/
+SAFX_Editor/release/
+
+# Pastas de entrega na raiz (binários grandes — não versionar)
+Windons/SAFX_Editor/
+Windons/SAFX_Editor_Setup.exe
+Macbook/SAFX_Editor_macos.dmg
+
 *.spec.bak
 *.egg-info/
 .eggs/

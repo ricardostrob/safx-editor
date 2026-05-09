@@ -29,15 +29,21 @@ _ensure("paramiko")
 
 # Detecta layout dir
 layout_candidates = [
-    os.path.join(BASE, "..", "MANUAL LAYOUT"),
+    os.path.join(BASE, "resources", "estrutura_md"),
     os.path.join(BASE, "..", "ESTRUTURA", "estrutura_md"),
+    os.path.join(BASE, "..", "MANUAL LAYOUT"),
     os.path.join(BASE, "MANUAL LAYOUT"),
 ]
 layout_dir = None
 for c in layout_candidates:
     if os.path.isdir(c):
-        layout_dir = os.path.normpath(c)
-        break
+        try:
+            import glob as _glob
+            if _glob.glob(os.path.join(c, "SAFX*.md")):
+                layout_dir = os.path.normpath(c)
+                break
+        except Exception:
+            pass
 
 # Injeta argumento para main.py
 if layout_dir:

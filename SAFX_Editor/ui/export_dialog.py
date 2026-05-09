@@ -9,23 +9,76 @@ import os
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QColor, QFont
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
                               QLabel, QPushButton, QComboBox, QListWidget,
                               QListWidgetItem, QFileDialog, QTextEdit,
                               QGroupBox, QMessageBox, QFrame, QSplitter,
                               QWidget, QAbstractItemView, QSizePolicy,
-                              QToolButton, QScrollArea, QCheckBox,
-                              QRadioButton, QButtonGroup, QLineEdit,
+                              QToolButton, QScrollArea, QAbstractScrollArea,
+                              QCheckBox, QRadioButton, QButtonGroup, QLineEdit,
                               QProgressDialog, QApplication)
 
 from core.database import SAFXDatabase, ROW_ID_COL
 from core.exporter import SAFXExporter
 from core.layout_manager import LayoutManager, DEFAULT_KEY_FIELDS
 from core.config import AppConfig
+from ui.window_utils import enable_dialog_min_max
 
 logger = logging.getLogger(__name__)
+
+
+def _sftp_profile_has_stored_credentials(sftp_cfg: dict) -> bool:
+    """True se o perfil salvo tem senha ou ficheiro de chave válido (o teste na Config. usa o formulário)."""
+    key = (sftp_cfg.get("key_path") or "").strip()
+    if key and os.path.isfile(key):
+        return True
+    return bool(str(sftp_cfg.get("password") or "").strip())
+
+
+class _ExportBlockScroll(QScrollArea):
+    """Scroll para blocos no Exportar: não herda altura mínima gigante do conteúdo (splitters).
+
+    O Destino (vários radios + grid) faz o QScrollArea puxar minimumSizeHint ~altura total
+    do conteúdo; a linha Ação|Escopo|Destino cresce e o QSplitter vertical abaixo fica sem folga.
+    """
+
+    def __init__(
+        self,
+        inner: QWidget,
+        max_vertical_min_hint: int | None = None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self._cap_v = max_vertical_min_hint
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        inner.setMinimumSize(0, 0)
+        self.setWidget(inner)
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if self._cap_v is None:
+            return hint
+        return QSize(
+            hint.width(),
+            min(self._cap_v, max(88, hint.height())),
+        )
+
+
+def _export_scroll_block(
+    inner: QWidget, *, max_vertical_min_hint: int | None = None,
+) -> QScrollArea:
+    """Envolve bloco em scroll; use max_vertical_min_hint no Destino (várias linhas)."""
+    return _ExportBlockScroll(inner, max_vertical_min_hint)
 
 
 class FieldListWidget(QListWidget):
@@ -96,6 +149,7 @@ class ExportDialog(QDialog):
         self._splitter_initialized = False   # aplicar tamanhos apenas uma vez
         self._setup_ui()
         self._load_defaults()
+        enable_dialog_min_max(self)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -112,21 +166,35 @@ class ExportDialog(QDialog):
                 geo.y() + (geo.height() - h) // 2,
             )
         if not self._splitter_initialized:
-            self._splitter_initialized = True
-            # Aguarda o layout estar finalizado antes de aplicar tamanhos
-            QTimer.singleShot(80, self._apply_splitter_sizes)
+            # Um único passe após o layout ter altura real (evita sobrescrever o arraste do usuário)
+            QTimer.singleShot(50, self._apply_splitter_sizes)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # NÃO reseta splitters no resize — deixa o usuário manter sua expansão
 
+    def closeEvent(self, event):
+        # Reseta flag para que reabertura aplique tamanhos padrão novamente
+        self._splitter_initialized = False
+        super().closeEvent(event)
+
     def _apply_splitter_sizes(self):
-        """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
+        """Distribui o espaço dos splitters proporcionalmente (só na 1ª exibição)."""
+        if self._splitter_initialized:
+            return
+        if hasattr(self, '_top_inner_splitter'):
+            th = self._top_inner_splitter.height()
+            htv = max(1, self._top_inner_splitter.handleWidth())
+            if th > htv + 160:
+                # Garante painel superior alto o bastante para Modo + Ação/Escopo/Destino
+                lower_h = max(120, min(int(th * 0.50), th - 220 - htv))
+                upper_h = max(200, th - lower_h - htv)
+                self._top_inner_splitter.setSizes([upper_h, lower_h])
         if hasattr(self, '_main_splitter'):
             total = self._main_splitter.height()
-            if total > 100:
+            if total > 150:
                 preview_h = max(120, int(total * 0.28))
-                top_h = total - preview_h
+                top_h = max(200, total - preview_h)
                 self._main_splitter.setSizes([top_h, preview_h])
         if hasattr(self, '_fields_splitter'):
             total_w = self._fields_splitter.width()
@@ -135,21 +203,34 @@ class ExportDialog(QDialog):
                 avail = max(200, int((total_w - btns) * 0.35))
                 rest  = max(140, (total_w - avail - btns) // 2)
                 self._fields_splitter.setSizes([avail, btns, rest, rest])
+        if hasattr(self, '_upper_mode_cfg_splitter'):
+            uh = self._upper_mode_cfg_splitter.height()
+            handle = max(1, self._upper_mode_cfg_splitter.handleWidth())
+            cfg_min = 96
+            if hasattr(self, '_export_config_container'):
+                cfg_min = max(72, self._export_config_container.minimumHeight())
+            if uh > cfg_min + 80 + handle:
+                mode_h = max(72, min(220, int((uh - handle) * 0.36)))
+                cfg_h = max(cfg_min, uh - handle - mode_h)
+                self._upper_mode_cfg_splitter.setSizes([mode_h, cfg_h])
+        self._splitter_initialized = True
 
     def _reset_splitter_layout(self):
         """Reseta os splitters para as proporções padrão — acionado pelo botão ⊞."""
-        if hasattr(self, '_main_splitter'):
-            total = self._main_splitter.height()
-            if total > 100:
-                preview_h = max(120, int(total * 0.28))
-                self._main_splitter.setSizes([total - preview_h, preview_h])
-        if hasattr(self, '_fields_splitter'):
-            total_w = self._fields_splitter.width()
-            if total_w > 400:
-                btns  = 148
-                avail = max(200, int((total_w - btns) * 0.35))
-                rest  = max(140, (total_w - avail - btns) // 2)
-                self._fields_splitter.setSizes([avail, btns, rest, rest])
+        self._splitter_initialized = False   # permite reaplicar tamanhos padrão
+        self._apply_splitter_sizes()
+        if hasattr(self, '_config_split'):
+            self._config_split.setSizes([120, 230, 480])
+        if hasattr(self, '_upper_mode_cfg_splitter'):
+            uh = self._upper_mode_cfg_splitter.height()
+            handle = max(1, self._upper_mode_cfg_splitter.handleWidth())
+            cfg_min = 96
+            if hasattr(self, '_export_config_container'):
+                cfg_min = max(72, self._export_config_container.minimumHeight())
+            if uh > cfg_min + 80 + handle:
+                mode_h = max(72, min(220, int((uh - handle) * 0.36)))
+                cfg_h = max(cfg_min, uh - handle - mode_h)
+                self._upper_mode_cfg_splitter.setSizes([mode_h, cfg_h])
 
     # ─── UI ───────────────────────────────────────────────────────────────────
 
@@ -246,13 +327,22 @@ class ExportDialog(QDialog):
         # SPLITTER PRINCIPAL: [Config + Campos] | [Preview]
         # ══════════════════════════════════════════════════════════════
         main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setHandleWidth(8)
-        main_splitter.setStyleSheet(
-            "QSplitter::handle:vertical {"
-            "  background:#26263a; border-top:1px solid #45475a;"
-            "  border-bottom:1px solid #45475a;"
-            "}"
-            "QSplitter::handle:vertical:hover { background:#1e3a5a; }")
+        main_splitter.setHandleWidth(4)
+        main_splitter.setOpaqueResize(True)
+        if self._is_dark:
+            main_splitter.setStyleSheet(
+                "QSplitter::handle:vertical {"
+                "  background:#26263a; border-top:1px solid #45475a;"
+                "  border-bottom:1px solid #45475a;"
+                "}"
+                "QSplitter::handle:vertical:hover { background:#1e3a5a; }")
+        else:
+            main_splitter.setStyleSheet(
+                "QSplitter::handle:vertical {"
+                "  background:#c8cbd8; border-top:1px solid #b8bcd0;"
+                "  border-bottom:1px solid #b8bcd0;"
+                "}"
+                "QSplitter::handle:vertical:hover { background:#4a90d9; }")
 
         # ── Área superior: Config + Campos ──
         top_w = QWidget()
@@ -260,23 +350,25 @@ class ExportDialog(QDialog):
         top_lay.setContentsMargins(14, 8, 14, 4)
         top_lay.setSpacing(6)
 
-        # ── Modo de exportação — cards visuais ────────────────────────────────
-        mode_group = QGroupBox("Modo de Exportação")
-        mode_group.setMaximumHeight(100)   # máximo, não fixo — permite splitter recolher
+        # ── Modo de exportação — painel sem QGroupBox (evita linha confundida com splitter)
+        mode_panel = QWidget()
+        mode_panel.setMinimumHeight(72)
+        self._mode_export_panel = mode_panel
+        mode_outer = QVBoxLayout(mode_panel)
+        mode_outer.setContentsMargins(0, 0, 0, 2)
+        mode_outer.setSpacing(6)
+        lbl_mode = QLabel("Modo de Exportação")
         if self._is_dark:
-            mode_group.setStyleSheet(
-                "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
-                "border:1px solid #313244;border-radius:8px;margin-top:10px;padding:10px 8px 8px 8px;}"
-                "QGroupBox::title{padding:0 8px;background:#1e1e2e;}")
+            lbl_mode.setStyleSheet(
+                "color:#89b4fa;font-size:12px;font-weight:800;background:transparent;")
         else:
-            mode_group.setStyleSheet(
-                "QGroupBox{color:#1a5ab4;font-size:12px;font-weight:700;"
-                "border:1px solid #b8bcd0;border-radius:8px;margin-top:10px;padding:10px 8px 8px 8px;}"
-                "QGroupBox::title{padding:0 8px;background:#f0f2f5;}")
-
-        mode_lay = QHBoxLayout(mode_group)
+            lbl_mode.setStyleSheet(
+                "color:#1a5ab4;font-size:12px;font-weight:800;background:transparent;")
+        mode_outer.addWidget(lbl_mode)
+        mode_row = QWidget()
+        mode_lay = QHBoxLayout(mode_row)
         mode_lay.setSpacing(10)
-        mode_lay.setContentsMargins(4, 2, 4, 4)
+        mode_lay.setContentsMargins(0, 0, 0, 0)
 
         # Cards: usamos QRadioButton mas estilizamos como card
         _MODES = [
@@ -321,6 +413,7 @@ class ExportDialog(QDialog):
             mode_lay.addWidget(rb)
 
         mode_lay.addStretch()
+        mode_outer.addWidget(mode_row)
         self.rb_mode_homolog.setChecked(True)
         _update_mode_styles()
 
@@ -328,14 +421,26 @@ class ExportDialog(QDialog):
         self.rb_mode_full.toggled.connect(self._on_mode_changed)
         self.rb_mode_changed_only.toggled.connect(self._on_mode_changed)
 
-        top_lay.addWidget(mode_group)
-
-        # ── Container para a linha Ação|Escopo|Destino ───────────────────────
+        # ── Ação | Escopo | Destino — splitter horizontal (redimensionável) ──
         config_container = QWidget()
-        config_container.setMaximumHeight(158)   # máximo, não fixo
-        config_lay = QHBoxLayout(config_container)
-        config_lay.setContentsMargins(0, 0, 0, 0)
-        config_lay.setSpacing(10)
+        config_container.setMinimumHeight(96)
+        self._export_config_container = config_container
+        config_outer = QVBoxLayout(config_container)
+        config_outer.setContentsMargins(0, 0, 0, 0)
+        config_outer.setSpacing(0)
+
+        config_split = QSplitter(Qt.Orientation.Horizontal)
+        config_split.setHandleWidth(4)
+        config_split.setOpaqueResize(True)
+        config_split.setChildrenCollapsible(False)
+        if self._is_dark:
+            config_split.setStyleSheet(
+                "QSplitter::handle { background: #313244; }"
+                "QSplitter::handle:hover { background: #89b4fa; }")
+        else:
+            config_split.setStyleSheet(
+                "QSplitter::handle { background: #c0c5d4; }"
+                "QSplitter::handle:hover { background: #4a90d9; }")
 
         # Estilo para GroupBoxes internos (tema-aware)
         if self._is_dark:
@@ -354,7 +459,9 @@ class ExportDialog(QDialog):
         # Ação
         action_group = QGroupBox("Ação")
         action_group.setStyleSheet(_gb_style)
-        action_group.setFixedWidth(120)
+        action_group.setMinimumWidth(108)
+        action_group.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
         ag_lay = QVBoxLayout(action_group)
         ag_lay.setContentsMargins(6, 4, 6, 4)
         ag_lay.setSpacing(0)
@@ -364,12 +471,14 @@ class ExportDialog(QDialog):
         self.combo_action.setStyleSheet("font-size:13px; font-weight:700;")
         ag_lay.addWidget(self.combo_action)
         ag_lay.addStretch()
-        config_lay.addWidget(action_group)
+        config_split.addWidget(action_group)
 
         # Escopo
         scope_group = QGroupBox("Escopo")
         scope_group.setStyleSheet(_gb_style)
-        scope_group.setFixedWidth(220)
+        scope_group.setMinimumWidth(200)
+        scope_group.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Preferred)
         sg_lay = QVBoxLayout(scope_group)
         sg_lay.setContentsMargins(6, 4, 6, 4)
         sg_lay.setSpacing(2)
@@ -384,26 +493,30 @@ class ExportDialog(QDialog):
         sg_lay.addWidget(self.radio_selected)
         sg_lay.addWidget(self.radio_all)
         sg_lay.addStretch()
-        config_lay.addWidget(scope_group)
+        config_split.addWidget(scope_group)
 
         # ── Destino — GridLayout para alinhar rb + engrenagem corretamente ──
         dest_group = QGroupBox("Destino")
         dest_group.setStyleSheet(_gb_style)
+        dest_group.setMinimumWidth(260)
+        dest_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         cfg = AppConfig.get()
         exp_cfg = cfg.export
-        sftp_cfg = cfg.sftp
+        sftp_cfg = cfg.get_sftp_profile_for_export()
         default_dest = exp_cfg.get("default_destination", "local")
 
         local_dir_txt  = (exp_cfg.get('local_dir','') or '—')
         local_dir_disp = local_dir_txt[:28] + "…" if len(local_dir_txt) > 28 else local_dir_txt
         srv_dir_txt    = (exp_cfg.get('server_dir','') or '—')
         srv_dir_disp   = srv_dir_txt[:28] + "…" if len(srv_dir_txt) > 28 else srv_dir_txt
-        sftp_host      = sftp_cfg.get("host","") if sftp_cfg.get("enabled") else ""
+        # Host do perfil de exportação (não depender de «enabled»: o upload usa o mesmo perfil salvo)
+        sftp_host = sftp_cfg.get("host", "") or ""
 
         self.rb_local = QRadioButton("📂  Salvar (diálogo)")
         self.rb_dir   = QRadioButton(f"📁  {local_dir_disp}")
-        self.rb_srv   = QRadioButton(f"🖥  {srv_dir_disp}")
+        self.rb_srv   = QRadioButton(f"🖥  Servidor: {srv_dir_disp}")
         self.rb_sftp  = QRadioButton(f"☁  {sftp_host or 'SFTP (não configurado)'}")
 
         self._dest_group = QButtonGroup(self)
@@ -429,6 +542,8 @@ class ExportDialog(QDialog):
             f"QRadioButton::indicator{{width:12px;height:12px;}}")
 
         _dest_rbs = (self.rb_local, self.rb_dir, self.rb_srv, self.rb_sftp)
+        for _rb in _dest_rbs:
+            _rb.setMinimumHeight(30)
 
         def _update_dst_styles():
             for rb_ in _dest_rbs:
@@ -477,11 +592,11 @@ class ExportDialog(QDialog):
 
         # GridLayout: col 0 = radio (stretch), col 1 = gear (fixed 28px)
         dg_grid = QGridLayout(dest_group)
-        dg_grid.setContentsMargins(6, 14, 6, 4)
-        dg_grid.setHorizontalSpacing(4)
-        dg_grid.setVerticalSpacing(2)
+        dg_grid.setContentsMargins(8, 16, 8, 8)
+        dg_grid.setHorizontalSpacing(6)
+        dg_grid.setVerticalSpacing(6)
         dg_grid.setColumnStretch(0, 1)
-        dg_grid.setColumnMinimumWidth(1, 26)
+        dg_grid.setColumnMinimumWidth(1, 30)
 
         # Linha 0: Local (sem engrenagem — usa placeholder transparente)
         dg_grid.addWidget(self.rb_local, 0, 0, 1, 2)   # ocupa 2 colunas
@@ -501,16 +616,43 @@ class ExportDialog(QDialog):
             rb.toggled.connect(_update_dst_styles)
         _update_dst_styles()
 
-        config_lay.addWidget(dest_group, 1)
-        top_lay.addWidget(config_container)
+        config_split.addWidget(
+            _export_scroll_block(dest_group, max_vertical_min_hint=220))
+        config_split.setStretchFactor(0, 0)
+        config_split.setStretchFactor(1, 0)
+        config_split.setStretchFactor(2, 1)
+        config_split.setSizes([120, 230, 480])
 
-        # ── Separador ──
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(
-            f"color:{'#313244' if self._is_dark else '#c8cbd8'}; margin:0 -14px;")
-        top_lay.addWidget(sep)
+        config_outer.addWidget(config_split)
+        self._config_split = config_split
+
+        upper_mode_cfg = QSplitter(Qt.Orientation.Vertical)
+        upper_mode_cfg.setHandleWidth(8)
+        upper_mode_cfg.setOpaqueResize(True)
+        upper_mode_cfg.setChildrenCollapsible(False)
+        upper_mode_cfg.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if self._is_dark:
+            upper_mode_cfg.setStyleSheet(
+                "QSplitter::handle:vertical{background:#26263a;"
+                "border-top:1px solid #45475a;border-bottom:1px solid #45475a;}"
+                "QSplitter::handle:vertical:hover{background:#1e3a5a;}")
+        else:
+            upper_mode_cfg.setStyleSheet(
+                "QSplitter::handle:vertical{background:#a8b0c8;"
+                "border-top:1px solid #8890a8;border-bottom:1px solid #8890a8;}"
+                "QSplitter::handle:vertical:hover{background:#4a90d9;}")
+        upper_mode_cfg.addWidget(mode_panel)
+        upper_mode_cfg.addWidget(config_container)
+        upper_mode_cfg.setStretchFactor(0, 1)
+        upper_mode_cfg.setStretchFactor(1, 1)
+        self._upper_mode_cfg_splitter = upper_mode_cfg
+
+        lower_export = QWidget()
+        low_lay = QVBoxLayout(lower_export)
+        low_lay.setContentsMargins(0, 2, 0, 0)
+        low_lay.setSpacing(0)
+        lower_export.setMinimumHeight(160)
 
         # ── Paleta de cores para a seção de campos (tema-aware) ──────────────
         if self._is_dark:
@@ -578,7 +720,8 @@ class ExportDialog(QDialog):
 
         # ── Splitter horizontal: Disponíveis + Botões + [Chaves | Alterados] ──
         fields_splitter = QSplitter(Qt.Orientation.Horizontal)
-        fields_splitter.setHandleWidth(5)
+        fields_splitter.setHandleWidth(4)
+        fields_splitter.setOpaqueResize(True)
         fields_splitter.setStyleSheet(
             f"QSplitter::handle:horizontal{{"
             f"background:{SPTR_HANDLE};border-left:1px solid {SPTR_BORDER};"
@@ -587,6 +730,8 @@ class ExportDialog(QDialog):
 
         # ── Coluna 1: Campos Disponíveis + busca ─────────────────────────────
         avail_w = QWidget()
+        avail_w.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         avail_lay = QVBoxLayout(avail_w)
         avail_lay.setContentsMargins(0, 0, 0, 0)
         avail_lay.setSpacing(0)
@@ -615,7 +760,9 @@ class ExportDialog(QDialog):
         self.search_edit.textChanged.connect(self._filter_available)
         avail_h.addWidget(self.search_edit)
 
-        lbl_hint = QLabel("2× clique → Chave   |   Selecione + botão → Alterado")
+        lbl_hint = QLabel(
+            "2× clique → Chave   |   Selecione + botão → Alterado\n"
+            "Arraste a barra acima para dar mais espaço a esta área.")
         lbl_hint.setStyleSheet(
             f"color:{F_HINT_TXT}; font-size:10px; background:transparent;")
         avail_h.addWidget(lbl_hint)
@@ -624,7 +771,7 @@ class ExportDialog(QDialog):
 
         self.list_avail = QListWidget()
         self.list_avail.setMinimumWidth(180)
-        self.list_avail.setMinimumHeight(100)
+        self.list_avail.setMinimumHeight(140)
         self.list_avail.setFont(QFont("Consolas", 11))
         self.list_avail.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -638,7 +785,7 @@ class ExportDialog(QDialog):
             f"QListWidget::item:selected{{background:{F_LIST_SEL};color:{F_LIST_SELTX};}}")
         self.list_avail.setAlternatingRowColors(True)
         avail_lay.addWidget(self.list_avail, 1)
-        fields_splitter.addWidget(avail_w)
+        fields_splitter.addWidget(_export_scroll_block(avail_w))
 
         # ── Coluna 2: Botões de transferência ────────────────────────────────
         arrows_w = QWidget()
@@ -700,7 +847,7 @@ class ExportDialog(QDialog):
         arrows_lay.addWidget(self.btn_reset)
 
         arrows_lay.addStretch()
-        fields_splitter.addWidget(arrows_w)
+        fields_splitter.addWidget(_export_scroll_block(arrows_w))
 
         # ── Coluna 3: Campos Chave ────────────────────────────────────────────
         key_w = QWidget()
@@ -735,7 +882,7 @@ class ExportDialog(QDialog):
             f"QListWidget::item:hover{{background:{KEY_LIST_HVR};}}"
             f"QListWidget::item:selected{{background:{KEY_LIST_SEL};color:{KEY_LIST_SELTX};}}")
         key_lay.addWidget(self.list_keys, 1)
-        fields_splitter.addWidget(key_w)
+        fields_splitter.addWidget(_export_scroll_block(key_w))
 
         # ── Coluna 4: Campos Alterados ────────────────────────────────────────
         chg_w = QWidget()
@@ -770,7 +917,7 @@ class ExportDialog(QDialog):
             f"QListWidget::item:hover{{background:{CHG_LIST_HVR};}}"
             f"QListWidget::item:selected{{background:{CHG_LIST_SEL};color:{CHG_LIST_SELTX};}}")
         chg_lay.addWidget(self.list_changes, 1)
-        fields_splitter.addWidget(chg_w)
+        fields_splitter.addWidget(_export_scroll_block(chg_w))
 
         # Impede colunas de desaparecerem completamente
         fields_splitter.setCollapsible(0, False)
@@ -779,9 +926,33 @@ class ExportDialog(QDialog):
         fields_splitter.setCollapsible(3, False)
         self._fields_splitter = fields_splitter
 
-        top_lay.addWidget(fields_splitter, 1)
+        low_lay.addWidget(fields_splitter, 1)
+
+        top_v_split = QSplitter(Qt.Orientation.Vertical)
+        top_v_split.setHandleWidth(8)
+        top_v_split.setOpaqueResize(True)
+        top_v_split.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if self._is_dark:
+            top_v_split.setStyleSheet(
+                "QSplitter::handle:vertical{background:#26263a;"
+                "border-top:1px solid #45475a;border-bottom:1px solid #45475a;}"
+                "QSplitter::handle:vertical:hover{background:#1e3a5a;}")
+        else:
+            top_v_split.setStyleSheet(
+                "QSplitter::handle:vertical{background:#a8b0c8;"
+                "border-top:1px solid #8890a8;border-bottom:1px solid #8890a8;}"
+                "QSplitter::handle:vertical:hover{background:#4a90d9;}")
+        top_v_split.setChildrenCollapsible(False)
+        top_v_split.addWidget(upper_mode_cfg)
+        top_v_split.addWidget(lower_export)
+        top_v_split.setStretchFactor(0, 1)
+        top_v_split.setStretchFactor(1, 1)
+        self._top_inner_splitter = top_v_split
+        top_lay.addWidget(top_v_split, 1)
 
         main_splitter.addWidget(top_w)
+        top_w.setMinimumHeight(200)   # seção superior nunca desaparece
 
         # ── Área inferior: Preview ────────────────────────────────────────────
         if self._is_dark:
@@ -798,6 +969,7 @@ class ExportDialog(QDialog):
             RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
 
         preview_w = QWidget()
+        preview_w.setMinimumHeight(110)   # preview nunca some completamente
         prev_lay = QVBoxLayout(preview_w)
         prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
@@ -1024,6 +1196,43 @@ class ExportDialog(QDialog):
             return self.selected_row_ids
         return self.all_row_ids
 
+    def _normalize_log_row_id(self, rid) -> Optional[int]:
+        """row_id vindo do log pode ser int ou string; '-' / vazio ignoram."""
+        if rid is None or rid == '' or rid == '-':
+            return None
+        try:
+            return int(rid)
+        except (TypeError, ValueError):
+            return None
+
+    def _get_changed_row_ids(self) -> List[int]:
+        """Retorna _row_id distintos de registros alterados no log (ordem do log)."""
+        seen = set()
+        result: List[int] = []
+        for entry in self.db.get_change_log():
+            if entry.get('table') != self.table_name:
+                continue
+            rid = self._normalize_log_row_id(entry.get('row_id'))
+            if rid is not None and rid not in seen:
+                seen.add(rid)
+                result.append(rid)
+        return result
+
+    def _homologated_export_row_ids(self) -> List[int]:
+        """CSV homologado: 'Só alterados' = só linhas do log; senão escopo + linhas alteradas fora da seleção."""
+        if self.rb_mode_changed_only.isChecked():
+            return self._get_changed_row_ids()
+        base = self._get_row_ids()
+        changed = self._get_changed_row_ids()
+        if not changed:
+            return base
+        if self.radio_all.isChecked():
+            return base
+        # Apenas selecionados: inclui outras linhas que já foram alteradas nesta sessão
+        # (evita exportar um único UPDATE quando há mudanças em mais _row_id).
+        sel_set = {int(x) for x in base}
+        return sorted(sel_set | set(changed))
+
     def _get_rows_data(self, row_ids: List[int]):
         if not row_ids:
             return [], []
@@ -1056,10 +1265,9 @@ class ExportDialog(QDialog):
             self.btn_export.setText("💾  Exportar CSV Homologado")
 
     def _generate_preview(self):
-        row_ids = self._get_row_ids()
-
         # Modo SAFX completo
         if self.rb_mode_full.isChecked():
+            row_ids = self._get_row_ids()
             cols, rows = self._get_rows_data(row_ids[:10])
             if not rows:
                 self.preview_text.setText("Nenhum dado para exportar.")
@@ -1084,15 +1292,12 @@ class ExportDialog(QDialog):
             self.preview_text.setText("⚠ Selecione pelo menos um campo alterado.")
             return
 
-        # Modo "apenas alterados": filtra pelos row_ids do change log
-        if self.rb_mode_changed_only.isChecked():
-            changed_ids = self._get_changed_row_ids()
-            if not changed_ids:
-                self.preview_text.setText(
-                    "⚠ Nenhum registro alterado nesta sessão.\n"
-                    "Use o modo Homologado completo para exportar todos os registros.")
-                return
-            row_ids = changed_ids
+        row_ids = self._homologated_export_row_ids()
+        if self.rb_mode_changed_only.isChecked() and not row_ids:
+            self.preview_text.setText(
+                "⚠ Nenhum registro alterado nesta sessão.\n"
+                "Use o modo Homologado completo para exportar todos os registros.")
+            return
 
         cols, rows = self._get_rows_data(row_ids[:20])
         if not rows:
@@ -1109,20 +1314,7 @@ class ExportDialog(QDialog):
 
     # ─── Exportação ───────────────────────────────────────────────────────────
 
-    def _get_changed_row_ids(self) -> List[int]:
-        """Retorna row_ids de registros que foram alterados no change log."""
-        seen = set()
-        result = []
-        for entry in self.db.get_change_log():
-            if entry.get('table') == self.table_name:
-                rid = entry.get('row_id')
-                if rid is not None and rid not in seen:
-                    seen.add(rid)
-                    result.append(rid)
-        return result
-
     def _do_export(self):
-        row_ids = self._get_row_ids()
         action = self.combo_action.currentText()
         is_full_mode = self.rb_mode_full.isChecked()
         is_changed_only = self.rb_mode_changed_only.isChecked()
@@ -1143,10 +1335,11 @@ class ExportDialog(QDialog):
             key_fields = []
             change_fields = []
 
-        # Modo apenas alterados — restringe row_ids
-        if is_changed_only:
-            row_ids = self._get_changed_row_ids()
-            if not row_ids:
+        if is_full_mode:
+            row_ids = self._get_row_ids()
+        else:
+            row_ids = self._homologated_export_row_ids()
+            if is_changed_only and not row_ids:
                 QMessageBox.warning(self, "Atenção",
                                     "Nenhum registro alterado nesta sessão para exportar.")
                 return
@@ -1199,13 +1392,25 @@ class ExportDialog(QDialog):
             path = str(Path(server_dir) / default_name)
 
         elif dest_id == 3:
-            sftp_cfg = cfg.sftp
+            sftp_cfg = cfg.get_sftp_profile_for_export()
             if not sftp_cfg.get("host"):
                 QMessageBox.warning(self, "SFTP não configurado",
                                     "Configure em: Arquivo > Configurações > SFTP")
                 return
+            if not _sftp_profile_has_stored_credentials(sftp_cfg):
+                QMessageBox.warning(
+                    self, "SFTP sem credenciais gravadas",
+                    "A exportação usa o perfil já salvo em disco — não o que está só no "
+                    "formulário da Configuração.\n\n"
+                    "Preencha a senha (ou a chave SSH) no perfil SFTP, clique em "
+                    "«Salvar e Fechar», e confira em Configurações > Exportação se o "
+                    "perfil SFTP selecionado para envio é o correto.")
+                return
             import tempfile
-            path = tempfile.mktemp(suffix=f"_{default_name}")
+            safe_suffix = "_" + default_name.replace(os.sep, "_").replace(" ", "_")
+            tf = tempfile.NamedTemporaryFile(delete=False, suffix=safe_suffix)
+            path = tf.name
+            tf.close()
 
         else:
             return
@@ -1213,6 +1418,11 @@ class ExportDialog(QDialog):
         # Gera o arquivo
         cols, rows = self._get_rows_data(row_ids)
         if not rows:
+            if dest_id == 3:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
             QMessageBox.warning(self, "Atenção", "Nenhum dado encontrado.")
             return
 
@@ -1227,12 +1437,17 @@ class ExportDialog(QDialog):
                 cols, rows, path)
 
         if count <= 0:
+            if dest_id == 3:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
             QMessageBox.critical(self, "Erro na Exportação", msg)
             return
 
         # SFTP upload
         if dest_id == 3:
-            sftp_cfg = cfg.sftp
+            sftp_cfg = cfg.get_sftp_profile_for_export()
             from core.sftp_manager import SFTPManager
 
             progress = QProgressDialog(

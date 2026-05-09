@@ -11,6 +11,12 @@ flask-cors>=4.0.0
 # SFTP (opcional — necessário para envio via SFTP)
 paramiko>=3.0.0
 
+# Oracle (importação ERP / banco externo — instale pelo menos um)
+# Modo thin (recomendado no Windows, sem Oracle Instant Client na maioria dos casos):
+#   pip install oracledb
+# Alternativa clássica (muitas vezes exige Oracle Instant Client no PATH):
+#   pip install cx_Oracle
+
 # Importação de planilhas Excel (JOIN com dados externos)
 openpyxl>=3.1.0
 

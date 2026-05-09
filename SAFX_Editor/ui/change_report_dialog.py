@@ -3,16 +3,15 @@ Diálogo de Relatório de Alterações — mostra tudo que foi editado e confirm
 """
 import os
 import csv
-import tempfile
+from datetime import datetime
 from typing import List, Dict
 
-from PyQt6.QtCore import Qt, QSortFilterProxyModel, QAbstractTableModel, QModelIndex
+from PyQt6.QtCore import Qt, QAbstractTableModel, QModelIndex, QStandardPaths
 from PyQt6.QtGui import QColor, QFont, QBrush
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableView, QHeaderView, QComboBox, QLineEdit, QWidget,
-    QMessageBox, QFileDialog, QFrame, QApplication, QSplitter,
-    QTextEdit, QSizePolicy
+    QMessageBox, QFileDialog, QApplication,
 )
 
 from core.database import SAFXDatabase
@@ -108,6 +107,9 @@ class ChangeReportDialog(QDialog):
         self.setMinimumSize(1100, 650)
         self.resize(1200, 720)
 
+        from ui.window_utils import enable_dialog_min_max
+        enable_dialog_min_max(self)
+
         self._all_data: List[Dict] = []
         self._filtered_data: List[Dict] = []
 
@@ -194,13 +196,28 @@ class ChangeReportDialog(QDialog):
 
         fb_lay.addStretch()
 
+        btn_download = QPushButton("💾 Baixar no PC (CSV)")
+        btn_download.setFixedHeight(30)
+        btn_download.setMinimumWidth(168)
+        btn_download.setToolTip(
+            "Salva o relatório exibido (com os filtros atuais) em um arquivo .csv "
+            "na pasta que você escolher neste computador.")
+        btn_download.clicked.connect(self._export_csv)
+        fb_lay.addWidget(btn_download)
+
         btn_refresh = QPushButton("🔄 Atualizar")
         btn_refresh.setFixedHeight(30)
         btn_refresh.setFixedWidth(100)
         btn_refresh.clicked.connect(self._load_data)
         fb_lay.addWidget(btn_refresh)
 
-        layout.addWidget(filter_bar)
+        from ui.window_utils import wrap_widget_in_scroll_area
+
+        mid = QWidget()
+        mid_lay = QVBoxLayout(mid)
+        mid_lay.setContentsMargins(0, 0, 0, 0)
+        mid_lay.setSpacing(0)
+        mid_lay.addWidget(filter_bar)
 
         # ── Tabela principal ──
         self.model = ChangeLogModel([], self)
@@ -217,8 +234,9 @@ class ChangeReportDialog(QDialog):
         self.table_view.horizontalHeader().setStretchLastSection(True)
         self.table_view.setEditTriggers(
             QTableView.EditTrigger.NoEditTriggers)
+        self.table_view.setMinimumHeight(160)
 
-        layout.addWidget(self.table_view, 1)
+        mid_lay.addWidget(self.table_view, 1)
 
         # ── Sumário ──
         summary_widget = QWidget()
@@ -234,7 +252,9 @@ class ChangeReportDialog(QDialog):
         self.lbl_summary.setWordWrap(True)
         s_lay.addWidget(self.lbl_summary, 1)
 
-        layout.addWidget(summary_widget)
+        mid_lay.addWidget(summary_widget)
+
+        layout.addWidget(wrap_widget_in_scroll_area(mid, self), 1)
 
         # ── Botões inferiores ──
         btn_bar = QWidget()
@@ -245,10 +265,13 @@ class ChangeReportDialog(QDialog):
         b_lay.setContentsMargins(12, 8, 12, 8)
         b_lay.setSpacing(8)
 
-        btn_export_csv = QPushButton("📥 Exportar CSV")
+        btn_export_csv = QPushButton("💾 Salvar no PC (CSV)…")
         btn_export_csv.setFixedHeight(34)
-        btn_export_csv.setFixedWidth(140)
+        btn_export_csv.setMinimumWidth(200)
         btn_export_csv.setProperty("class", "primary")
+        btn_export_csv.setToolTip(
+            "Abre a pasta desta máquina para guardar o relatório de ajustes "
+            "(linhas visíveis com os filtros atuais). Formato CSV com separador ; e UTF-8.")
         btn_export_csv.clicked.connect(self._export_csv)
         b_lay.addWidget(btn_export_csv)
 
@@ -356,17 +379,32 @@ class ChangeReportDialog(QDialog):
 
     # ─── Ações ────────────────────────────────────────────────────────────────
 
+    def _suggested_export_path(self) -> str:
+        """Caminho inicial: pasta Downloads (ou home) + nome com data/hora."""
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"safx_relatorio_alteracoes_{stamp}.csv"
+        base = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DownloadLocation)
+        if not base:
+            base = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.HomeLocation) or os.path.expanduser("~")
+        return os.path.join(base, name)
+
     def _export_csv(self):
         if not self._filtered_data:
             QMessageBox.information(self, "Vazio", "Nenhuma alteração para exportar.")
             return
 
+        start_path = self._suggested_export_path()
         path, _ = QFileDialog.getSaveFileName(
-            self, "Exportar Relatório",
-            "relatorio_alteracoes.csv",
+            self,
+            "Salvar relatório de ajustes neste computador",
+            start_path,
             "CSV (*.csv);;Todos (*)")
         if not path:
             return
+        if not path.lower().endswith(".csv"):
+            path = path + ".csv"
 
         try:
             with open(path, 'w', newline='', encoding='utf-8-sig') as f:
@@ -377,10 +415,11 @@ class ChangeReportDialog(QDialog):
                 writer.writerows(self._filtered_data)
 
             QMessageBox.information(
-                self, "Exportado",
-                f"Relatório exportado com sucesso!\n\n{path}")
+                self, "Salvo no PC",
+                f"Relatório gravado nesta máquina:\n\n{path}\n\n"
+                f"({len(self._filtered_data)} linha(s) com os filtros atuais.)")
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao exportar:\n{e}")
+            QMessageBox.critical(self, "Erro", f"Falha ao salvar o arquivo:\n{e}")
 
     def _copy_all(self):
         if not self._filtered_data:

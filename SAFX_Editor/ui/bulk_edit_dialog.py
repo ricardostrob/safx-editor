@@ -33,9 +33,13 @@ class BulkEditDialog(QDialog):
 
         from ui.styles import MAIN_STYLE
         self.setStyleSheet(MAIN_STYLE)
+        from ui.window_utils import enable_dialog_min_max, wrap_widget_in_scroll_area
+        enable_dialog_min_max(self)
         self._setup_ui()
 
     def _setup_ui(self):
+        from ui.window_utils import wrap_widget_in_scroll_area
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -169,7 +173,8 @@ class BulkEditDialog(QDialog):
         body_lay.addWidget(self.preview_lbl)
 
         body_lay.addStretch()
-        layout.addWidget(body, 1)
+        scroll = wrap_widget_in_scroll_area(body, self)
+        layout.addWidget(scroll, 1)
 
         # Conecta preview em tempo real
         self.edit_value.textChanged.connect(self._update_preview)

@@ -139,15 +139,21 @@ class ImportWorker(QThread):
 class TableSidebarItem(QListWidgetItem):
     """Item da sidebar com info da tabela."""
 
-    def __init__(self, table_name: str, row_count: int = 0):
+    def __init__(self, table_name: str, row_count: int = 0,
+                 is_external: bool = False):
         super().__init__()
         self.table_name = table_name
         self.row_count = row_count
+        self.is_external = is_external
         self._update_text()
         self.setFont(QFont("Segoe UI", 11))
 
     def _update_text(self):
-        self.setText(f"  {self.table_name}\n  {self.row_count:,} registros")
+        if self.is_external:
+            self.setText(
+                f"📊 {self.table_name}\n   {self.row_count:,} registros (externa)")
+        else:
+            self.setText(f"  {self.table_name}\n  {self.row_count:,} registros")
 
     def update_count(self, count: int):
         self.row_count = count
@@ -190,7 +196,7 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self):
         self.setWindowTitle("SAFX Editor — MasterSAF Data Adjuster | Adejo Desenvolvimento")
-        self.setMinimumSize(1200, 700)
+        self.setMinimumSize(900, 560)
 
         # Determina tamanho/posição com base na resolução disponível
         screen = QApplication.primaryScreen()
@@ -227,7 +233,8 @@ class MainWindow(QMainWindow):
 
         # ── Splitter principal ──
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_splitter.setHandleWidth(3)
+        self.main_splitter.setHandleWidth(8)
+        self.main_splitter.setOpaqueResize(True)
 
         # ── Sidebar ──
         sidebar = self._create_sidebar()
@@ -266,6 +273,10 @@ class MainWindow(QMainWindow):
             "color:#45475a; font-size:10px; padding:0 6px;"
             "border-left:1px solid #313244;")
         self.status_bar.addPermanentWidget(lbl_copy)
+
+        # QMainWindow: permite docks aninhados e animação (base para UI adaptativa)
+        self.setDockNestingEnabled(True)
+        self.setAnimated(True)
 
     def _create_sidebar(self) -> QWidget:
         sidebar = QWidget()
@@ -317,20 +328,19 @@ class MainWindow(QMainWindow):
         import_layout.setSpacing(6)
 
         self.btn_import = QPushButton("+ Importar SAFX")
-        self.btn_import.setProperty("class", "primary")
         self.btn_import.setFixedHeight(34)
+        self.btn_import.setObjectName("sidebarImportBtn")
         self.btn_import.clicked.connect(self.import_safx)
         import_layout.addWidget(self.btn_import)
 
-        btn_settings = QPushButton("⚙")
-        btn_settings.setFixedSize(34, 34)
-        btn_settings.setToolTip("Configurações (Ctrl+,)")
-        btn_settings.setStyleSheet(
-            "QPushButton{background:#313244;color:#89b4fa;border:none;"
-            "border-radius:6px;font-size:16px;}"
-            "QPushButton:hover{background:#45475a;}")
-        btn_settings.clicked.connect(self._open_settings)
-        import_layout.addWidget(btn_settings)
+        self._btn_settings_sidebar = QPushButton("⚙")
+        self._btn_settings_sidebar.setFixedSize(34, 34)
+        self._btn_settings_sidebar.setObjectName("sidebarGearBtn")
+        self._btn_settings_sidebar.setToolTip("Configurações (Ctrl+,)")
+        self._btn_settings_sidebar.clicked.connect(self._open_settings)
+        import_layout.addWidget(self._btn_settings_sidebar)
+
+        self._import_widget_ref = import_widget   # ref para refresh_theme
 
         layout.addWidget(import_widget)
 
@@ -352,7 +362,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.table_list)
 
         # Placeholder
-        self.lbl_no_tables = QLabel("Nenhuma tabela\nimportada ainda.\n\nImporte arquivos\nSAFX .txt")
+        self.lbl_no_tables = QLabel(
+            "Nenhuma tabela\nimportada ainda.\n\n"
+            "Importe SAFX .txt ou\nplanilha externa (menu).")
         self.lbl_no_tables.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_no_tables.setStyleSheet("color:#45475a; font-size:12px; padding:20px;")
         layout.addWidget(self.lbl_no_tables)
@@ -367,6 +379,7 @@ class MainWindow(QMainWindow):
 
         # ── Header da tabela ativa ──
         self.table_header = QWidget()
+        self.table_header.setObjectName("mainTableHeader")
         self.table_header.setFixedHeight(44)
         self.table_header.setStyleSheet(
             "background:#13131f; border-bottom:2px solid #313244;")
@@ -412,6 +425,7 @@ class MainWindow(QMainWindow):
 
         # Tab SQL
         self.sql_panel = SQLPanel(self.db)
+        self.sql_panel.schemaChanged.connect(self._sync_sidebar_sqlite_tables)
         self.tab_widget.addTab(self.sql_panel, "  🔍 Editor SQL  ")
 
         # Conecta o sinal de commit do painel de dados
@@ -629,13 +643,111 @@ class MainWindow(QMainWindow):
     def _apply_style(self):
         from ui.styles import get_style
         theme = self.cfg.get_value("ui", "theme", "dark")
-        self.setStyleSheet(get_style(theme))
+        QApplication.instance().setStyleSheet(get_style(theme))
+        # Deixa o stylesheet aplicar antes de repintar painéis (menos “travamento” perceptível)
+        QTimer.singleShot(0, lambda t=theme: self._broadcast_theme(t))
+
+    def _broadcast_theme(self, theme: str):
+        """Propaga mudança de tema para painéis com estilos próprios."""
+        dark = theme != 'light'
+        # Sidebar (import button + gear)
+        self._apply_sidebar_theme(dark)
+        # Painel de dados principal
+        if hasattr(self, 'data_panel') and self.data_panel is not None:
+            self.data_panel.refresh_theme(theme)
+        # Todos os painéis nos tabs
+        if hasattr(self, 'tab_widget'):
+            for i in range(self.tab_widget.count()):
+                w = self.tab_widget.widget(i)
+                if hasattr(w, 'refresh_theme'):
+                    w.refresh_theme(theme)
+        # SQL panel
+        if hasattr(self, 'sql_panel') and hasattr(self.sql_panel, 'refresh_theme'):
+            self.sql_panel.refresh_theme(theme)
+        self._apply_main_header_theme(theme)
+
+    def _apply_main_header_theme(self, theme: str):
+        """Cabeçalho da tabela ativa: contraste explícito em claro e escuro."""
+        dark = theme != 'light'
+        if dark:
+            bg = "#16162a"
+            bd = "#45475a"
+            title = "#b8d8ff"
+            subtitle = "#b4bcd8"
+            btn_bg = "#2a2a42"
+            btn_bd = "#6c7086"
+            btn_tx = "#f0f0f8"
+            btn_hv = "#3d3d58"
+            prim_bg = "#89b4fa"
+            prim_tx = "#11111a"
+            prim_bd = "#b4d0ff"
+            prim_hv = "#b4d0ff"
+        else:
+            bg = "#d8e2f2"
+            bd = "#7a8aa8"
+            title = "#0a2a5c"
+            subtitle = "#2a3548"
+            btn_bg = "#ffffff"
+            btn_bd = "#3a5a90"
+            btn_tx = "#0a1a30"
+            btn_hv = "#c8daf0"
+            prim_bg = "#1a5ab4"
+            prim_tx = "#ffffff"
+            prim_bd = "#0d4070"
+            prim_hv = "#2468d8"
+
+        if not hasattr(self, 'table_header'):
+            return
+        self.table_header.setStyleSheet(
+            f"QWidget#mainTableHeader{{background:{bg};border-bottom:2px solid {bd};}}")
+        self.lbl_active_table.setStyleSheet(
+            f"color:{title};font-size:15px;font-weight:700;background:transparent;")
+        self.lbl_active_info.setStyleSheet(
+            f"color:{subtitle};font-size:12px;background:transparent;")
+        self.btn_config_keys.setStyleSheet(
+            f"QPushButton{{background:{btn_bg};color:{btn_tx};"
+            f"border:2px solid {btn_bd};border-radius:6px;padding:6px 14px;font-weight:700;}}"
+            f"QPushButton:hover{{background:{btn_hv};}}")
+        self.btn_export.setStyleSheet(
+            f"QPushButton{{background:{prim_bg};color:{prim_tx};"
+            f"border:2px solid {prim_bd};border-radius:6px;padding:6px 16px;font-weight:800;}}"
+            f"QPushButton:hover{{background:{prim_hv};color:{prim_tx};}}")
+
+    def _apply_sidebar_theme(self, dark: bool):
+        """Atualiza estilos do sidebar (botão Importar + engrenagem)."""
+        if dark:
+            imp_bg  = "#1e4a8a"; imp_tx = "#ffffff"
+            imp_hv  = "#2a5fa0"
+            gear_bg = "#313244"; gear_tx = "#89b4fa"; gear_hv = "#45475a"
+            bar_bg  = "#181825"
+        else:
+            imp_bg  = "#1a5faa"; imp_tx = "#ffffff"
+            imp_hv  = "#2370c0"
+            gear_bg = "#dde1ea"; gear_tx = "#1a5faa"; gear_hv = "#c8cfe4"
+            bar_bg  = "#dde1ea"
+
+        if hasattr(self, 'btn_import'):
+            self.btn_import.setStyleSheet(
+                f"QPushButton{{background:{imp_bg};color:{imp_tx};border:none;"
+                f"border-radius:6px;font-size:13px;font-weight:700;padding:0 8px;}}"
+                f"QPushButton:hover{{background:{imp_hv};}}")
+        if hasattr(self, '_btn_settings_sidebar'):
+            self._btn_settings_sidebar.setStyleSheet(
+                f"QPushButton{{background:{gear_bg};color:{gear_tx};border:none;"
+                f"border-radius:6px;font-size:16px;}}"
+                f"QPushButton:hover{{background:{gear_hv};}}")
+        if hasattr(self, '_import_widget_ref'):
+            self._import_widget_ref.setStyleSheet(
+                f"background:{bar_bg}; padding:8px;")
 
     def _update_ui_state(self):
         has_table = self._current_table is not None
-        self.btn_export.setVisible(has_table)
-        self.btn_config_keys.setVisible(has_table)
-        has_tables = bool(self.db.get_loaded_tables())
+        has_safx_layout = (
+            has_table and self._current_table in self.db.loaded_tables)
+        self.btn_export.setVisible(has_safx_layout)
+        self.btn_config_keys.setVisible(has_safx_layout)
+        has_tables = bool(self.db.get_loaded_tables()) or bool(
+            self.db.list_external_tables())
         self.lbl_no_tables.setVisible(not has_tables)
 
     def _update_layout_dir_label(self):
@@ -743,6 +855,41 @@ class MainWindow(QMainWindow):
         worker.start()
         progress.exec()
 
+    def _sync_sidebar_sqlite_tables(self):
+        """
+        Sincroniza a lista lateral com tabelas físicas no SQLite (CREATE/DROP
+        no Editor SQL). Adiciona entradas em falta e remove tabelas que deixaram
+        de existir.
+        """
+        try:
+            physical = self.db.list_sqlite_user_tables()
+        except Exception:
+            return
+        phys_upper = {t.upper() for t in physical}
+
+        for i in range(self.table_list.count() - 1, -1, -1):
+            it = self.table_list.item(i)
+            if not isinstance(it, TableSidebarItem):
+                continue
+            if it.table_name.upper() not in phys_upper:
+                self.table_list.takeItem(i)
+
+        have = set()
+        for i in range(self.table_list.count()):
+            it = self.table_list.item(i)
+            if isinstance(it, TableSidebarItem):
+                have.add(it.table_name.upper())
+
+        for name in sorted(physical, key=lambda x: x.upper()):
+            if name.upper() in have:
+                continue
+            try:
+                n = self.db.count_rows(name)
+            except Exception:
+                n = 0
+            self.table_list.addItem(TableSidebarItem(name, n))
+            have.add(name.upper())
+
     def _on_table_imported(self, table_name: str, count: int):
         """Chamado quando importação finaliza."""
         # Atualiza ou adiciona na sidebar
@@ -779,13 +926,17 @@ class MainWindow(QMainWindow):
             self.lbl_active_info.setText(
                 f"Banco: {layout.bank_table}  |  "
                 f"{len(layout.fields)} campos")
+        elif table_name in self.db.list_external_tables():
+            ncols = len(self.db.get_table_columns(table_name))
+            self.lbl_active_info.setText(
+                f"Planilha externa  |  {ncols} colunas  |  use no JOIN no SQL")
 
         # Carrega no painel de dados
         key_fields = self._key_fields.get(table_name, [])
         self.data_panel.load_table(table_name, key_fields)
 
         # Atualiza SQL panel
-        self.sql_panel.update_tables(self.db.get_loaded_tables())
+        self.sql_panel.update_tables(self.db.get_tables_for_sql_panel())
 
         # Atualiza aba de estrutura
         self._update_schema_tab(table_name)
@@ -845,7 +996,8 @@ class MainWindow(QMainWindow):
         menu.exec(self.table_list.mapToGlobal(pos))
 
     def _quick_sql_select(self, table_name: str):
-        sql = f'SELECT * FROM "{table_name}" LIMIT 1000'
+        # Sem LIMIT: ajuste em massa exige ver todas as linhas no resultado
+        sql = f'SELECT * FROM "{table_name}"'
         self.sql_panel.set_query(sql)
         self.tab_widget.setCurrentIndex(1)
 
@@ -872,7 +1024,11 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"Tabela {table_name} removida", 3000)
 
     def _close_all_tables(self):
-        for name in list(self.db.get_loaded_tables()):
+        names = list(self.db.get_loaded_tables())
+        for ext in self.db.list_external_tables():
+            if ext not in names:
+                names.append(ext)
+        for name in names:
             self.db.drop_table(name)
         self.table_list.clear()
         self._current_table = None
@@ -889,6 +1045,13 @@ class MainWindow(QMainWindow):
         self._export_table(self._current_table)
 
     def _export_table(self, table_name: str):
+        if table_name not in self.db.loaded_tables:
+            QMessageBox.information(
+                self, "Exportar",
+                "A exportação no formato homologado SAFX exige o layout da tabela.\n\n"
+                "Para dados de planilha externa, use a aba «Editor SQL», "
+                "execute um SELECT e copie ou exporte a partir do resultado.")
+            return
         selected_ids = self.data_panel.get_selected_row_ids()
         all_ids = self.data_panel.get_all_filtered_row_ids()
 
@@ -920,6 +1083,9 @@ class MainWindow(QMainWindow):
         dlg.setMinimumSize(400, 500)
         from ui.styles import get_style as _gs
         dlg.setStyleSheet(_gs(self.cfg.get_value("ui", "theme", "dark")))
+
+        from ui.window_utils import enable_dialog_min_max
+        enable_dialog_min_max(dlg)
 
         dlg_layout = QVBoxLayout(dlg)
         dlg_layout.setSpacing(8)
@@ -977,7 +1143,7 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int):
         if index == 1:  # SQL
-            self.sql_panel.update_tables(self.db.get_loaded_tables())
+            self.sql_panel.update_tables(self.db.get_tables_for_sql_panel())
 
     def _on_data_modified(self, row_id: int, field: str, old: str, new: str):
         self.status_bar.showMessage(
@@ -988,6 +1154,8 @@ class MainWindow(QMainWindow):
         count = len(changes)
         self.status_bar.showMessage(
             f"✓ {count} alteração(ões) confirmada(s) e registrada(s) no relatório", 5000)
+        if hasattr(self, 'sql_panel') and self.sql_panel is not None:
+            self.sql_panel._update_undo_sql_btn()
 
     def _show_change_report(self):
         """Abre o diálogo de relatório de alterações."""
@@ -1018,12 +1186,40 @@ class MainWindow(QMainWindow):
             f"✔  {table_name} importado via ERP — {count:,} registros", 6000)
 
     def _on_external_table_imported(self, table_name: str, columns: list):
-        """Atualiza UI após importar planilha externa."""
-        self.status_bar.showMessage(
-            f"✔  Tabela externa '{table_name}' importada com {len(columns)} colunas "
-            f"— disponível para JOIN no editor SQL", 6000)
-        # Atualiza a lista de tabelas no painel SQL (se aberto)
-        self._refresh_sql_table_list(table_name, columns, is_external=True)
+        """Atualiza UI após importar planilha externa (sidebar + dados, como SAFX)."""
+        try:
+            try:
+                count = self.db.count_rows(table_name)
+            except Exception:
+                count = 0
+            self.status_bar.showMessage(
+                f"✔  Tabela externa «{table_name}» — {count:,} linhas, "
+                f"{len(columns)} colunas — aberta na aba Dados", 8000)
+
+            for i in range(self.table_list.count()):
+                item = self.table_list.item(i)
+                if isinstance(item, TableSidebarItem) and item.table_name == table_name:
+                    item.is_external = True
+                    item.update_count(count)
+                    self.table_list.setCurrentItem(item)
+                    self._select_table(table_name)
+                    self._refresh_sql_table_list(table_name, columns, is_external=True)
+                    self.tab_widget.setCurrentIndex(0)
+                    self._update_ui_state()
+                    return
+
+            item = TableSidebarItem(table_name, count, is_external=True)
+            self.table_list.addItem(item)
+            self.table_list.setCurrentItem(item)
+            self._select_table(table_name)
+            self._refresh_sql_table_list(table_name, columns, is_external=True)
+            self.tab_widget.setCurrentIndex(0)
+            self._update_ui_state()
+        except Exception as e:
+            logger.exception("Falha ao atualizar UI após importação externa")
+            QMessageBox.critical(
+                self, "Erro na interface",
+                f"A tabela pode ter sido criada, mas a lista lateral falhou:\n{e}")
 
     def _refresh_sql_table_list(self, table_name: str, columns: list,
                                 is_external: bool = False):

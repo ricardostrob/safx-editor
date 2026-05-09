@@ -1,0 +1,214 @@
+# SAFX93
+
+**Owner:** MSAFDW
+
+## 📋 Campos da Tabela
+
+| Campo | Tipo | Tamanho | Precisão | Escala | Nulo | ID | Padrão |
+|-------|------|---------|----------|--------|------|----|---------|
+| COD_EMPRESA | VARCHAR2 | 3 | - | - | ✓ | 1 | - |
+| COD_ESTAB | VARCHAR2 | 6 | - | - | ✓ | 2 | - |
+| DATA_FISCAL | VARCHAR2 | 8 | - | - | ✓ | 3 | - |
+| MOVTO_E_S | CHAR | 1 | - | - | ✓ | 4 | - |
+| NORM_DEV | CHAR | 1 | - | - | ✓ | 5 | - |
+| COD_DOCTO | VARCHAR2 | 5 | - | - | ✓ | 6 | - |
+| IND_FIS_JUR | CHAR | 1 | - | - | ✓ | 7 | - |
+| COD_FIS_JUR | VARCHAR2 | 14 | - | - | ✓ | 8 | - |
+| NUM_DOCFIS | VARCHAR2 | 12 | - | - | ✓ | 9 | - |
+| SERIE_DOCFIS | VARCHAR2 | 3 | - | - | ✓ | 10 | - |
+| SUB_SERIE_DOCFIS | VARCHAR2 | 2 | - | - | ✓ | 11 | - |
+| IND_BEM_PATR | CHAR | 1 | - | - | ✓ | 12 | - |
+| IND_PRODUTO | CHAR | 1 | - | - | ✓ | 13 | - |
+| COD_PRODUTO | VARCHAR2 | 60 | - | - | ✓ | 14 | - |
+| COD_BEM | VARCHAR2 | 60 | - | - | ✓ | 15 | - |
+| COD_INC_BEM | VARCHAR2 | 6 | - | - | ✓ | 16 | - |
+| COD_UND_PADRAO | VARCHAR2 | 8 | - | - | ✓ | 17 | - |
+| NUM_ITEM | VARCHAR2 | 5 | - | - | ✓ | 18 | - |
+| COD_ALMOX | VARCHAR2 | 20 | - | - | ✓ | 19 | - |
+| COD_CUSTO | VARCHAR2 | 50 | - | - | ✓ | 20 | - |
+| DESCRICAO_COMPL | VARCHAR2 | 50 | - | - | ✓ | 21 | - |
+| COD_CFO | VARCHAR2 | 4 | - | - | ✓ | 22 | - |
+| COD_NATUREZA_OP | VARCHAR2 | 3 | - | - | ✓ | 23 | - |
+| QUANTIDADE | VARCHAR2 | 17 | - | - | ✓ | 24 | - |
+| COD_MEDIDA | VARCHAR2 | 8 | - | - | ✓ | 25 | - |
+| COD_NBM | VARCHAR2 | 10 | - | - | ✓ | 26 | - |
+| VLR_UNIT | VARCHAR2 | 19 | - | - | ✓ | 27 | - |
+| VLR_ITEM | VARCHAR2 | 17 | - | - | ✓ | 28 | - |
+| VLR_DESCONTO | VARCHAR2 | 17 | - | - | ✓ | 29 | - |
+| COD_SITUACAO_A | CHAR | 1 | - | - | ✓ | 30 | - |
+| COD_SITUACAO_B | VARCHAR2 | 2 | - | - | ✓ | 31 | - |
+| COD_FEDERAL | VARCHAR2 | 5 | - | - | ✓ | 32 | - |
+| IND_IPI_INCLUSO | CHAR | 1 | - | - | ✓ | 33 | - |
+| NUM_ROMANEIO | VARCHAR2 | 12 | - | - | ✓ | 34 | - |
+| DATA_ROMANEIO | VARCHAR2 | 8 | - | - | ✓ | 35 | - |
+| PESO_LIQUIDO | VARCHAR2 | 14 | - | - | ✓ | 36 | - |
+| COD_INDICE | VARCHAR2 | 10 | - | - | ✓ | 37 | - |
+| VLR_ITEM_CONVER | VARCHAR2 | 17 | - | - | ✓ | 38 | - |
+| VLR_FRETE | VARCHAR2 | 17 | - | - | ✓ | 39 | - |
+| VLR_SEGURO | VARCHAR2 | 17 | - | - | ✓ | 40 | - |
+| VLR_OUTRAS | VARCHAR2 | 17 | - | - | ✓ | 41 | - |
+| VLR_ALIQ_ICMS | VARCHAR2 | 7 | - | - | ✓ | 42 | - |
+| VLR_ICMS | VARCHAR2 | 17 | - | - | ✓ | 43 | - |
+| DIF_ALIQ_ICMS | VARCHAR2 | 7 | - | - | ✓ | 44 | - |
+| OBS_ICMS | VARCHAR2 | 45 | - | - | ✓ | 45 | - |
+| COD_APUR_ICMS | VARCHAR2 | 5 | - | - | ✓ | 46 | - |
+| VLR_ALIQ_IPI | VARCHAR2 | 7 | - | - | ✓ | 47 | - |
+| VLR_IPI | VARCHAR2 | 17 | - | - | ✓ | 48 | - |
+| OBS_IPI | VARCHAR2 | 45 | - | - | ✓ | 49 | - |
+| COD_APUR_IPI | VARCHAR2 | 5 | - | - | ✓ | 50 | - |
+| VLR_ALIQ_SUB_ICMS | VARCHAR2 | 7 | - | - | ✓ | 51 | - |
+| VLR_SUBST_ICMS | VARCHAR2 | 17 | - | - | ✓ | 52 | - |
+| OBS_SUBST_ICMS | VARCHAR2 | 45 | - | - | ✓ | 53 | - |
+| COD_APUR_SUB_ICMS | VARCHAR2 | 5 | - | - | ✓ | 54 | - |
+| TRIB_ICMS | CHAR | 1 | - | - | ✓ | 55 | - |
+| BASE_ICMS | VARCHAR2 | 17 | - | - | ✓ | 56 | - |
+| BASE_REDU_ICMS | VARCHAR2 | 17 | - | - | ✓ | 57 | - |
+| TRIB_IPI | CHAR | 1 | - | - | ✓ | 58 | - |
+| BASE_IPI | VARCHAR2 | 17 | - | - | ✓ | 59 | - |
+| BASE_REDU_IPI | VARCHAR2 | 17 | - | - | ✓ | 60 | - |
+| BASE_SUB_TRIB_ICMS | VARCHAR2 | 17 | - | - | ✓ | 61 | - |
+| VLR_CONTAB_COMPL | VARCHAR2 | 17 | - | - | ✓ | 62 | - |
+| VLR_ALIQ_DESTINO | VARCHAR2 | 7 | - | - | ✓ | 63 | - |
+| VLR_OUTROS1 | VARCHAR2 | 17 | - | - | ✓ | 64 | - |
+| VLR_OUTROS2 | VARCHAR2 | 17 | - | - | ✓ | 65 | - |
+| VLR_OUTROS3 | VARCHAR2 | 17 | - | - | ✓ | 66 | - |
+| VLR_OUTROS4 | VARCHAR2 | 17 | - | - | ✓ | 67 | - |
+| VLR_OUTROS5 | VARCHAR2 | 17 | - | - | ✓ | 68 | - |
+| VLR_ALIQ_OUTROS1 | VARCHAR2 | 7 | - | - | ✓ | 69 | - |
+| VLR_ALIQ_OUTROS2 | VARCHAR2 | 7 | - | - | ✓ | 70 | - |
+| VLR_CONTAB_ITEM | VARCHAR2 | 17 | - | - | ✓ | 71 | - |
+| COD_OBS_VCONT_COMP | VARCHAR2 | 10 | - | - | ✓ | 72 | - |
+| COD_OBS_VCONT_ITEM | VARCHAR2 | 10 | - | - | ✓ | 73 | - |
+| VLR_OUTROS_ICMS | VARCHAR2 | 17 | - | - | ✓ | 74 | - |
+| VLR_OUTROS_IPI | VARCHAR2 | 17 | - | - | ✓ | 75 | - |
+| NUM_ATO_CONCES | VARCHAR2 | 15 | - | - | ✓ | 76 | - |
+| DAT_EMBARQUE | VARCHAR2 | 8 | - | - | ✓ | 77 | - |
+| NUM_REG_EXP | VARCHAR2 | 12 | - | - | ✓ | 78 | - |
+| NUM_DESP_EXP | VARCHAR2 | 11 | - | - | ✓ | 79 | - |
+| VLR_TOM_SERVICO | VARCHAR2 | 17 | - | - | ✓ | 80 | - |
+| VLR_DESP_MOEDA_EXP | VARCHAR2 | 17 | - | - | ✓ | 81 | - |
+| COD_MOEDA_NEGOC | VARCHAR2 | 10 | - | - | ✓ | 82 | - |
+| COD_PAIS_DEST_ORIG | VARCHAR2 | 3 | - | - | ✓ | 83 | - |
+| IND_CRED_ICMSS | CHAR | 1 | - | - | ✓ | 84 | - |
+| COD_TRIB_INT | VARCHAR2 | 5 | - | - | ✓ | 85 | - |
+| VLR_ICMS_NDESTAC | VARCHAR2 | 17 | - | - | ✓ | 86 | - |
+| VLR_IPI_NDESTAC | VARCHAR2 | 17 | - | - | ✓ | 87 | - |
+| TRIB_ICMS_AUX | CHAR | 1 | - | - | ✓ | 88 | - |
+| BASE_ICMS_AUX | VARCHAR2 | 17 | - | - | ✓ | 89 | - |
+| TRIB_IPI_AUX | CHAR | 1 | - | - | ✓ | 90 | - |
+| BASE_IPI_AUX | VARCHAR2 | 17 | - | - | ✓ | 91 | - |
+| VLR_BASE_PIS | VARCHAR2 | 17 | - | - | ✓ | 92 | - |
+| VLR_PIS | VARCHAR2 | 17 | - | - | ✓ | 93 | - |
+| VLR_BASE_COFINS | VARCHAR2 | 17 | - | - | ✓ | 94 | - |
+| VLR_COFINS | VARCHAR2 | 17 | - | - | ✓ | 95 | - |
+| BASE_ICMS_ORIGDEST | VARCHAR2 | 17 | - | - | ✓ | 96 | - |
+| VLR_ICMS_ORIGDEST | VARCHAR2 | 17 | - | - | ✓ | 97 | - |
+| ALIQ_ICMS_ORIGDEST | VARCHAR2 | 7 | - | - | ✓ | 98 | - |
+| VLR_DESC_CONDIC | VARCHAR2 | 17 | - | - | ✓ | 99 | - |
+| TRIB_ICMSS | CHAR | 1 | - | - | ✓ | 100 | - |
+| BASE_REDU_ICMSS | VARCHAR2 | 17 | - | - | ✓ | 101 | - |
+| VLR_CUSTO_TRANSF | VARCHAR2 | 17 | - | - | ✓ | 102 | - |
+| PERC_RED_BASE_ICMS | VARCHAR2 | 7 | - | - | ✓ | 103 | - |
+| QTD_EMBARCADA | VARCHAR2 | 17 | - | - | ✓ | 104 | - |
+| DAT_REGISTRO_EXP | VARCHAR2 | 8 | - | - | ✓ | 105 | - |
+| DAT_DESPACHO | VARCHAR2 | 8 | - | - | ✓ | 106 | - |
+| DAT_AVERBACAO | VARCHAR2 | 8 | - | - | ✓ | 107 | - |
+| DAT_DI | VARCHAR2 | 8 | - | - | ✓ | 108 | - |
+| NUM_DEC_IMP_REF | VARCHAR2 | 12 | - | - | ✓ | 109 | - |
+| DAT_GRAVACAO | DATE | 7 | - | - | ✓ | 110 | - |
+| DSC_MOT_OCOR | VARCHAR2 | 45 | - | - | ✓ | 111 | - |
+| COD_CONTA | VARCHAR2 | 70 | - | - | ✓ | 112 | - |
+| VLR_BASE_ICMS_ORIG | VARCHAR2 | 17 | - | - | ✓ | 113 | - |
+| VLR_TRIB_ICMS_ORIG | VARCHAR2 | 17 | - | - | ✓ | 114 | - |
+| VLR_BASE_ICMS_DEST | VARCHAR2 | 17 | - | - | ✓ | 115 | - |
+| VLR_TRIB_ICMS_DEST | VARCHAR2 | 17 | - | - | ✓ | 116 | - |
+| VLR_PERC_PRES_ICMS | VARCHAR2 | 7 | - | - | ✓ | 117 | - |
+| VLR_PRECO_BASE_ST | VARCHAR2 | 17 | - | - | ✓ | 118 | - |
+| COD_OPER_OIL | VARCHAR2 | 10 | - | - | ✓ | 119 | - |
+| COD_DCR | VARCHAR2 | 9 | - | - | ✓ | 120 | - |
+| COD_PROJETO | VARCHAR2 | 20 | - | - | ✓ | 121 | - |
+| IND_MOV_FIS | CHAR | 1 | - | - | ✓ | 122 | - |
+| CHASSI | VARCHAR2 | 17 | - | - | ✓ | 123 | - |
+| NUM_DOCFIS_REF | VARCHAR2 | 12 | - | - | ✓ | 124 | - |
+| SERIE_DOCFIS_REF | VARCHAR2 | 3 | - | - | ✓ | 125 | - |
+| SSERIE_DOCFIS_REF | VARCHAR2 | 2 | - | - | ✓ | 126 | - |
+| VLR_BASE_PIS_ST | VARCHAR2 | 17 | - | - | ✓ | 127 | - |
+| VLR_ALIQ_PIS_ST | VARCHAR2 | 7 | - | - | ✓ | 128 | - |
+| VLR_PIS_ST | VARCHAR2 | 17 | - | - | ✓ | 129 | - |
+| VLR_BASE_COFINS_ST | VARCHAR2 | 17 | - | - | ✓ | 130 | - |
+| VLR_ALIQ_COFINS_ST | VARCHAR2 | 7 | - | - | ✓ | 131 | - |
+| VLR_COFINS_ST | VARCHAR2 | 17 | - | - | ✓ | 132 | - |
+| VLR_BASE_CSLL | VARCHAR2 | 17 | - | - | ✓ | 133 | - |
+| VLR_ALIQ_CSLL | VARCHAR2 | 7 | - | - | ✓ | 134 | - |
+| VLR_CSLL | VARCHAR2 | 17 | - | - | ✓ | 135 | - |
+| VLR_ALIQ_PIS | VARCHAR2 | 7 | - | - | ✓ | 136 | - |
+| VLR_ALIQ_COFINS | VARCHAR2 | 7 | - | - | ✓ | 137 | - |
+| IND_FORNEC_ICMSS | CHAR | 1 | - | - | ✓ | 138 | - |
+| IND_SITUACAO_ESP_ST | CHAR | 1 | - | - | ✓ | 139 | - |
+| VLR_ICMSS_NDESTAC | VARCHAR2 | 17 | - | - | ✓ | 140 | - |
+| IND_DOCTO_REC | CHAR | 1 | - | - | ✓ | 141 | - |
+| DAT_PGTO_GNRE_DARJ | VARCHAR2 | 8 | - | - | ✓ | 142 | - |
+| VLR_CUSTO_UNIT | VARCHAR2 | 17 | - | - | ✓ | 143 | - |
+| QUANTIDADE_CONV | VARCHAR2 | 17 | - | - | ✓ | 144 | - |
+| VLR_FECP_ICMS | VARCHAR2 | 17 | - | - | ✓ | 145 | - |
+| VLR_FECP_DIFALIQ | VARCHAR2 | 17 | - | - | ✓ | 146 | - |
+| VLR_FECP_ICMS_ST | VARCHAR2 | 17 | - | - | ✓ | 147 | - |
+| VLR_FECP_FONTE | VARCHAR2 | 17 | - | - | ✓ | 148 | - |
+| TRIB_ICMSS_AUX2 | CHAR | 1 | - | - | ✓ | 149 | - |
+| BASE_ICMSS_AUX2 | VARCHAR2 | 17 | - | - | ✓ | 150 | - |
+| VLR_BASE_ICMSS_N_ESCRIT | VARCHAR2 | 17 | - | - | ✓ | 151 | - |
+| VLR_ICMSS_N_ESCRIT | VARCHAR2 | 17 | - | - | ✓ | 152 | - |
+| COD_TRIB_IPI | VARCHAR2 | 2 | - | - | ✓ | 153 | - |
+| LOTE_MEDICAMENTO | VARCHAR2 | 50 | - | - | ✓ | 154 | - |
+| VALID_MEDICAMENTO | VARCHAR2 | 8 | - | - | ✓ | 155 | - |
+| IND_BASE_MEDICAMENTO | CHAR | 1 | - | - | ✓ | 156 | - |
+| VLR_PRECO_MEDICAMENTO | VARCHAR2 | 17 | - | - | ✓ | 157 | - |
+| IND_TIPO_ARMA | CHAR | 1 | - | - | ✓ | 158 | - |
+| NUM_SERIE_ARMA | VARCHAR2 | 50 | - | - | ✓ | 159 | - |
+| NUM_CANO_ARMA | VARCHAR2 | 50 | - | - | ✓ | 160 | - |
+| DSC_ARMA | VARCHAR2 | 100 | - | - | ✓ | 161 | - |
+| COD_OBSERVACAO | VARCHAR2 | 8 | - | - | ✓ | 162 | - |
+| COD_EX_NCM | VARCHAR2 | 2 | - | - | ✓ | 163 | - |
+| COD_EX_IMP | VARCHAR2 | 2 | - | - | ✓ | 164 | - |
+| IND_ATO_COTEPE | CHAR | 1 | - | - | ✓ | 165 | 'N' |
+| CNPJ_OPERADORA | VARCHAR2 | 14 | - | - | ✓ | 166 | - |
+| CPF_OPERADORA | VARCHAR2 | 14 | - | - | ✓ | 167 | - |
+| UF_OPERADORA | VARCHAR2 | 2 | - | - | ✓ | 168 | - |
+| INS_EST_OPERADORA | VARCHAR2 | 14 | - | - | ✓ | 169 | - |
+| IND_ESPECIF_RECEITA | CHAR | 1 | - | - | ✓ | 170 | - |
+| COD_CLASS_ITEM | VARCHAR2 | 4 | - | - | ✓ | 171 | - |
+| VLR_TERCEIROS | VARCHAR2 | 17 | - | - | ✓ | 172 | - |
+| VLR_PRECO_SUGER | VARCHAR2 | 17 | - | - | ✓ | 173 | - |
+| VLR_BASE_CIDE | VARCHAR2 | 17 | - | - | ✓ | 174 | - |
+| VLR_ALIQ_CIDE | VARCHAR2 | 7 | - | - | ✓ | 175 | - |
+| VLR_CIDE | VARCHAR2 | 17 | - | - | ✓ | 176 | - |
+| COD_OPER_ESP_ST | VARCHAR2 | 2 | - | - | ✓ | 177 | - |
+| VLR_FATOR_CONV | VARCHAR2 | 17 | - | - | ✓ | 178 | - |
+| COD_ENQUAD_IPI | VARCHAR2 | 3 | - | - | ✓ | 179 | - |
+| COD_SITUACAO_PIS | VARCHAR2 | 2 | - | - | ✓ | 180 | - |
+| QTD_BASE_PIS | VARCHAR2 | 18 | - | - | ✓ | 181 | - |
+| VLR_ALIQ_PIS_R | VARCHAR2 | 19 | - | - | ✓ | 182 | - |
+| COD_SITUACAO_COFINS | VARCHAR2 | 2 | - | - | ✓ | 183 | - |
+| QTD_BASE_COFINS | VARCHAR2 | 18 | - | - | ✓ | 184 | - |
+| VLR_ALIQ_COFINS_R | VARCHAR2 | 19 | - | - | ✓ | 185 | - |
+| VLR_ICMS_FRETE | VARCHAR2 | 17 | - | - | ✓ | 186 | - |
+| VLR_DIFAL_FRETE | VARCHAR2 | 17 | - | - | ✓ | 187 | - |
+| IND_VLR_PIS_COFINS | CHAR | 1 | - | - | ✓ | 188 | 'N' |
+| VLR_COMISSAO | VARCHAR2 | 17 | - | - | ✓ | 189 | - |
+| ITEM_PORT_TARE | VARCHAR2 | 2 | - | - | ✓ | 190 | - |
+| VLR_FUNRURAL | VARCHAR2 | 17 | - | - | ✓ | 191 | - |
+| IND_TP_PROD_MEDIC | CHAR | 1 | - | - | ✓ | 192 | - |
+| PST_ID | NUMBER | 22 | - | - | ✓ | 193 | - |
+
+## 🔒 Constraints
+
+*Nenhuma constraint encontrada para esta tabela.*
+
+## 📊 Informações Adicionais
+
+- **Total de Campos:** 193
+- **Total de Constraints:** 0
+- **Última Análise:** 05/09/2022 17:25:57
+
+---
+*Gerado automaticamente em 06/07/2025 16:21:45*
