@@ -31,7 +31,12 @@ jobs:
           pip install -r requirements.txt
           pip install -r packaging/requirements-build.txt
 
-      - name: Gerar assets de branding
+      - name: Copiar logo para pasta de branding
+        working-directory: SAFX_Editor
+        run: Copy-Item "resources\app_icon.png" "packaging\branding\logo.png" -Force
+        shell: pwsh
+
+      - name: Gerar assets de branding (wizard + icone com logo)
         working-directory: SAFX_Editor
         env:
           PYTHONUTF8: "1"
