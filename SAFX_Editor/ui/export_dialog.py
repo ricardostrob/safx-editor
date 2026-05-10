@@ -246,20 +246,16 @@ class ExportDialog(QDialog):
         # SPLITTER PRINCIPAL: [Config + Campos] | [Preview]
         # ══════════════════════════════════════════════════════════════
         main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setHandleWidth(12)
+        main_splitter.setHandleWidth(6)
         main_splitter.setStyleSheet(
             "QSplitter::handle:vertical {"
-            "  background:#313244;"
-            "  border-top:2px solid #89b4fa;"
-            "  border-bottom:2px solid #89b4fa;"
-            "  margin:0 40px;"
+            "  background:#26263a; border-top:1px solid #45475a;"
+            "  border-bottom:1px solid #45475a;"
             "}"
-            "QSplitter::handle:vertical:hover { background:#1e3a5a; }"
-            "QSplitter::handle:vertical:pressed { background:#89b4fa; }")
+            "QSplitter::handle:vertical:hover { background:#1e3a5a; }")
 
         # ── Área superior: Config + Campos ──
         top_w = QWidget()
-        top_w.setMinimumHeight(280)  # impede a área de campos de ser espremida
         top_lay = QVBoxLayout(top_w)
         top_lay.setContentsMargins(14, 8, 14, 4)
         top_lay.setSpacing(6)
@@ -802,7 +798,7 @@ class ExportDialog(QDialog):
             RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
 
         preview_w = QWidget()
-        preview_w.setMinimumHeight(130)  # impede sumir ao arrastar splitter
+        preview_w.setMinimumHeight(80)  # impede sumir ao arrastar splitter
         prev_lay = QVBoxLayout(preview_w)
         prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
