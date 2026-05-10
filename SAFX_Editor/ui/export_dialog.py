@@ -105,8 +105,7 @@ class ExportDialog(QDialog):
         self._setup_ui()
         self._load_defaults()
 
-    # Altura mínima garantida para o painel de preview (em px)
-    _PREVIEW_MIN_H = 90
+    _PREVIEW_MIN_H = 90  # mantido só para _reset_splitter_layout
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -131,20 +130,6 @@ class ExportDialog(QDialog):
         super().resizeEvent(event)
         # NÃO reseta splitters no resize — deixa o usuário manter sua expansão
 
-    def _clamp_preview(self, pos: int, index: int):
-        """Garante que o preview nunca suma ao arrastar o splitter principal.
-        Usa QTimer para não interromper o evento de drag do mouse."""
-        if index != 1:
-            return
-        total = self._main_splitter.height()
-        if total <= 0:
-            return
-        if (total - pos) < self._PREVIEW_MIN_H:
-            min_h = self._PREVIEW_MIN_H
-            QTimer.singleShot(0, lambda: (
-                self._main_splitter.setSizes([total - min_h, min_h])
-                if hasattr(self, '_main_splitter') else None
-            ))
 
     def _apply_splitter_sizes(self):
         """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
@@ -293,7 +278,7 @@ class ExportDialog(QDialog):
 
         # ── Modo de exportação — cards visuais ────────────────────────────────
         mode_group = QGroupBox("Modo de Exportação")
-        mode_group.setMaximumHeight(100)   # máximo, não fixo — permite splitter recolher
+        mode_group.setMaximumHeight(82)
         if self._is_dark:
             mode_group.setStyleSheet(
                 "QGroupBox{color:#89b4fa;font-size:12px;font-weight:700;"
@@ -363,7 +348,7 @@ class ExportDialog(QDialog):
 
         # ── Container para a linha Ação|Escopo|Destino ───────────────────────
         config_container = QWidget()
-        config_container.setMaximumHeight(158)   # máximo, não fixo
+        config_container.setMaximumHeight(130)
         config_lay = QHBoxLayout(config_container)
         config_lay.setContentsMargins(0, 0, 0, 0)
         config_lay.setSpacing(10)
@@ -829,6 +814,7 @@ class ExportDialog(QDialog):
             RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
 
         preview_w = QWidget()
+        preview_w.setMinimumHeight(90)  # Qt nativo impede colapso — sem clamp manual
         prev_lay = QVBoxLayout(preview_w)
         prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
@@ -895,8 +881,6 @@ class ExportDialog(QDialog):
         main_splitter.setStretchFactor(0, 3)
         main_splitter.setStretchFactor(1, 1)
         self._main_splitter = main_splitter
-        # Trava em tempo real: o preview nunca some ao arrastar
-        main_splitter.splitterMoved.connect(self._clamp_preview)
 
         root.addWidget(main_splitter, 1)
 
