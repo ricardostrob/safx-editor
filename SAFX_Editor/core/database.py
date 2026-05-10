@@ -6,7 +6,7 @@ import sqlite3
 import logging
 import threading
 import datetime as _dt
-from typing import List, Dict, Tuple, Optional, Any, Set, cast
+from typing import List, Dict, Tuple, Optional, Any
 
 from .layout_manager import TableLayout
 
@@ -14,49 +14,6 @@ logger = logging.getLogger(__name__)
 
 # Coluna interna de controle de linha
 ROW_ID_COL = '_row_id'
-
-
-def strip_leading_sql_line_comments(sql: str) -> str:
-    """
-    Remove linhas vazias e comentários ``--`` do início do script.
-    O SQLite aceita comentários antes do SELECT; esta função alinha a
-    deteção SELECT/DML e EXPLAIN com o que o motor realmente executa.
-    """
-    if not sql:
-        return ''
-    lines = sql.splitlines()
-    i = 0
-    while i < len(lines):
-        s = lines[i].strip()
-        if not s or s.startswith('--'):
-            i += 1
-            continue
-        break
-    return '\n'.join(lines[i:]).strip()
-
-
-def sql_cell_text_for_import(v: Any) -> str:
-    """Normaliza valor de célula (planilha) para TEXT no SQLite (espaços, etc.)."""
-    if v is None:
-        return ''
-    return str(v).strip()
-
-
-def format_sqlite_error(exc: sqlite3.Error) -> str:
-    """
-    Mensagem detalhada para diagnóstico (subtipo/código SQLite quando disponíveis).
-    """
-    name = getattr(exc, 'sqlite_errorname', None) or ''
-    code = getattr(exc, 'sqlite_errorcode', None)
-    lines = [
-        '[Erro de execução SQL — confira nomes de tabelas/colunas e o ON do JOIN]',
-    ]
-    if name:
-        lines.append(f'Subtipo SQLite: {name}')
-    if code is not None:
-        lines.append(f'Código numérico: {code}')
-    lines.append(f'Mensagem: {exc}')
-    return '\n'.join(lines)
 
 
 class SAFXDatabase:
@@ -71,11 +28,7 @@ class SAFXDatabase:
         self.loaded_tables: Dict[str, TableLayout] = {}
         self._in_manual_transaction = False  # rastreia transações manuais
         self._change_log: List[Dict] = []    # log de todas as alterações commitadas
-        # Lotes desfazíveis: cada lote = lista de {table, row_id, field, old_value, new_value}
-        self._undo_batches: List[List[Dict[str, Any]]] = []
         self._external_tables: set = set()   # tabelas externas (Excel/CSV importados)
-        self._external_schemas: Dict[str, Tuple[str, ...]] = {}
-        # ^ layout temporário: colunas por nome físico (atualizado a cada import externa)
 
         # Otimizações para arquivos grandes
         self.conn.execute("PRAGMA journal_mode = MEMORY")
@@ -138,9 +91,50 @@ class SAFXDatabase:
         })
 
     def add_sql_to_change_log(self, sql_stmt: str, affected: int):
-        """Registra um UPDATE/INSERT/DELETE SQL no log."""
+        """Registra um UPDATE/INSERT/DELETE SQL no log.
+
+        Para UPDATEs, parseia a tabela e os campos do SET para que o
+        exportador reconheça automaticamente os campos alterados.
+        """
+        import re
+        ts = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        upper = sql_stmt.strip().upper()
+        if upper.startswith('UPDATE'):
+            # Extrai nome da tabela: UPDATE "TABELA" ou UPDATE TABELA
+            tbl_m = re.search(r'\bUPDATE\s+"?(\w+)"?', sql_stmt, re.IGNORECASE)
+            # Extrai cláusula SET até o WHERE (ou fim)
+            set_m = re.search(r'\bSET\b(.+?)(?:\bWHERE\b|$)', sql_stmt,
+                               re.IGNORECASE | re.DOTALL)
+
+            table_name = tbl_m.group(1).upper() if tbl_m else '(SQL)'
+            fields_parsed: list[str] = []
+
+            if set_m:
+                set_clause = set_m.group(1)
+                # Extrai nomes de coluna: identifica "CAMPO = " antes de cada valor
+                fields_parsed = [
+                    m.upper()
+                    for m in re.findall(r'\b(\w+)\s*=\s*', set_clause)
+                ]
+
+            if fields_parsed and table_name != '(SQL)':
+                # Registra uma entrada por campo → exportador detecta automaticamente
+                for field in fields_parsed:
+                    self._change_log.append({
+                        'timestamp': ts,
+                        'table': table_name,
+                        'row_id': '-',
+                        'field': field,
+                        'old_value': '',
+                        'new_value': f'(via SQL — {affected} linha(s) afetada(s))',
+                        'source': 'sql',
+                    })
+                return  # entradas individuais já adicionadas
+
+        # Fallback para INSERT/DELETE ou UPDATE sem parse bem-sucedido
         self._change_log.append({
-            'timestamp': _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'timestamp': ts,
             'table': '(SQL)',
             'row_id': '-',
             'field': f'{affected} linha(s)',
@@ -157,120 +151,50 @@ class SAFXDatabase:
         """Limpa o log de alterações."""
         self._change_log.clear()
 
-    def record_undo_batch(self, entries: List[Dict[str, Any]]) -> None:
-        """
-        Registra um lote desfazível (último «Confirmar» na grade Dados,
-        edição na grade SQL, ou colar em massa).
-        Cada entrada: table, row_id, field, old_value, new_value.
-        """
-        if not entries:
-            return
-        batch = []
-        for e in entries:
-            batch.append({
-                'table': str(e.get('table', '')),
-                'row_id': int(e['row_id']),
-                'field': str(e.get('field', '')),
-                'old_value': str(e.get('old_value', '')),
-                'new_value': str(e.get('new_value', '')),
-            })
-        self._undo_batches.append(batch)
-
-    def can_undo(self) -> bool:
-        return bool(self._undo_batches)
-
-    def undo_last_batch(self) -> Tuple[bool, str]:
-        """Restaura valores anteriores do último lote confirmado/editado."""
-        if not self._undo_batches:
-            return False, 'Nada para desfazer.'
-        batch = self._undo_batches.pop()
-        restored = 0
-        errors = 0
-        for e in batch:
-            try:
-                ok = self.update_cell(
-                    e['table'], cast(int, e['row_id']),
-                    e['field'], e['old_value'])
-                if ok:
-                    restored += 1
-                else:
-                    errors += 1
-            except Exception as ex:
-                errors += 1
-                logger.warning(f'Undo célula falhou: {ex}')
-        self._change_log.append({
-            'timestamp': _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'table': '(app)',
-            'row_id': '-',
-            'field': 'DESFAZER',
-            'old_value': '',
-            'new_value': (
-                f'Revertido lote de {len(batch)} edição(ões) '
-                f'({restored} célula(s) restauradas no SQLite)'
-                + (f'; {errors} falha(s)' if errors else '')),
-            'source': 'undo',
-        })
-        return True, (
-            f'{restored} célula(s) restaurada(s) ao estado anterior.'
-            + (f' ({errors} falha(s))' if errors else ''))
-
     # ─── Tabelas externas (Excel / CSV para JOIN) ────────────────────────────
 
     def import_external_table(self, table_name: str,
                               columns: List[str],
                               rows: List[List],
-                              progress_cb=None) -> Tuple[int, str]:
+                              progress_cb=None) -> int:
         """
         Cria (ou substitui) uma tabela temporária no SQLite com dados externos
-        (Excel, CSV...). Retorna (número de linhas importadas, nome físico da tabela).
+        (Excel, CSV...). Retorna número de linhas importadas.
         """
         safe = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
-        raw_safe = [''.join(c if c.isalnum() or c == '_' else '_' for c in str(col))
-                    for col in columns]
-        # CREATE TABLE falha se houver nomes duplicados após sanitização
-        safe_cols: List[str] = []
-        seen: Dict[str, int] = {}
-        for c in raw_safe:
-            base = c or 'COL'
-            n = seen.get(base, 0)
-            seen[base] = n + 1
-            safe_cols.append(base if n == 0 else f'{base}_{n + 1}')
-
-        insert_cols = ', '.join(f'"{c}"' for c in safe_cols)
-        placeholders = ','.join('?' * len(safe_cols))
-        insert_sql = (
-            f'INSERT INTO "{safe}" ({insert_cols}) VALUES ({placeholders})'
-        )
+        safe_cols = [''.join(c if c.isalnum() or c == '_' else '_' for c in str(col))
+                     for col in columns]
 
         with self._lock:
             cur = self.conn.cursor()
             cur.execute(f'DROP TABLE IF EXISTS "{safe}"')
-            col_parts = [f'"{ROW_ID_COL}" INTEGER PRIMARY KEY AUTOINCREMENT']
-            col_parts += [f'"{c}" TEXT' for c in safe_cols]
-            cols_def = ', '.join(col_parts)
+            cols_def = ', '.join(f'"{c}" TEXT' for c in safe_cols)
             cur.execute(f'CREATE TABLE "{safe}" ({cols_def})')
 
             batch_size = 5_000
             total = 0
             buf = []
+            placeholders = ','.join('?' * len(safe_cols))
 
             for row in rows:
                 padded = list(row) + [''] * max(0, len(safe_cols) - len(row))
-                buf.append([sql_cell_text_for_import(v) for v in padded[:len(safe_cols)]])
+                buf.append([str(v) if v is not None else '' for v in padded[:len(safe_cols)]])
                 total += 1
                 if len(buf) >= batch_size:
-                    cur.executemany(insert_sql, buf)
+                    cur.executemany(
+                        f'INSERT INTO "{safe}" VALUES ({placeholders})', buf)
                     buf.clear()
                     if progress_cb:
                         progress_cb(total)
 
             if buf:
-                cur.executemany(insert_sql, buf)
+                cur.executemany(
+                    f'INSERT INTO "{safe}" VALUES ({placeholders})', buf)
             self.conn.commit()
-            self._external_tables.add(safe)
-            self._external_schemas[safe] = tuple(safe_cols)
 
-        return total, safe
+        # Registra como tabela externa
+        self._external_tables.add(safe)
+        return total
 
     def drop_external_table(self, table_name: str):
         safe = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
@@ -278,7 +202,6 @@ class SAFXDatabase:
             self.conn.execute(f'DROP TABLE IF EXISTS "{safe}"')
             self.conn.commit()
         self._external_tables.discard(safe)
-        self._external_schemas.pop(safe, None)
 
     def list_external_tables(self) -> List[str]:
         return list(self._external_tables)
@@ -346,26 +269,20 @@ class SAFXDatabase:
 
     def get_table_data(self, table_name: str,
                        filters: Optional[Dict[str, str]] = None,
-                       limit: Optional[int] = 2000,
+                       limit: int = 2000,
                        offset: int = 0) -> Tuple[List[str], List[tuple]]:
         """
         Retorna dados da tabela com filtros opcionais.
         Retorna (colunas, linhas).
-        Se ``limit`` for ``None``, retorna todas as linhas que passam pelo filtro
-        (sem LIMIT — uso na grade para ajuste em massa).
         """
         where_parts, params = self._build_where(filters)
         where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-        if limit is None:
-            sql = f'SELECT * FROM "{table_name}" {where_sql}'
-            qparams = list(params)
-        else:
-            sql = f'SELECT * FROM "{table_name}" {where_sql} LIMIT ? OFFSET ?'
-            qparams = list(params) + [limit, offset]
+        sql = f'SELECT * FROM "{table_name}" {where_sql} LIMIT ? OFFSET ?'
+        params = list(params) + [limit, offset]
 
         with self._lock:
             cur = self.conn.cursor()
-            cur.execute(sql, qparams)
+            cur.execute(sql, params)
             rows = cur.fetchall()
             columns = [d[0] for d in cur.description] if cur.description else []
 
@@ -482,8 +399,7 @@ class SAFXDatabase:
         if not sql_strip:
             return [], [], 'SQL vazio'
 
-        sql_head = strip_leading_sql_line_comments(sql_strip)
-        upper = sql_head.upper()
+        upper = sql_strip.upper()
 
         # Controle de transação via SQL
         if upper == 'BEGIN' or upper.startswith('BEGIN '):
@@ -507,24 +423,23 @@ class SAFXDatabase:
 
                 cur.execute(sql_strip)
 
-                # Usar description: comentários ``--`` antes do SELECT quebravam startswith('SELECT')
-                if cur.description is not None:
+                if (upper.startswith('SELECT') or upper.startswith('EXPLAIN')
+                        or upper.startswith('WITH') or upper.startswith('PRAGMA')):
                     rows = cur.fetchall()
-                    cols = [d[0] for d in cur.description]
+                    cols = [d[0] for d in cur.description] if cur.description else []
                     return cols, [tuple(r) for r in rows], ''
-                tx_note = " [transacao pendente - use COMMIT ou Rollback]" \
-                    if self._in_manual_transaction else ""
-                first_tok = upper.split(None, 1)[0] if upper else ''
-                if first_tok in (
-                        'CREATE', 'DROP', 'ALTER', 'REINDEX', 'VACUUM',
-                        'ANALYZE', 'ATTACH', 'DETACH'):
-                    return [], [], f'OK: DDL executado com sucesso.{tx_note}'
-                affected = cur.rowcount if cur.rowcount >= 0 else 0
-                msg = f'OK: {affected} linha(s) afetada(s){tx_note}'
-                return [], [], msg
+                else:
+                    # DML com isolation_level=None: auto-commit automático
+                    # Só precisamos de COMMIT explícito se estiver em transação manual
+                    # (caso contrário cada stmt já commitou automaticamente)
+                    affected = cur.rowcount if cur.rowcount >= 0 else 0
+                    tx_note = " [transacao pendente - use COMMIT ou Rollback]" \
+                        if self._in_manual_transaction else ""
+                    msg = f'OK: {affected} linha(s) afetada(s){tx_note}'
+                    return [], [], msg
 
         except sqlite3.Error as e:
-            return [], [], format_sqlite_error(e)
+            return [], [], f'Erro SQL: {e}'
 
     def _execute_multi(self, stmts: List[str]) -> Tuple[List[str], List[tuple], str]:
         """Executa múltiplas instruções SQL em sequência."""
@@ -533,8 +448,7 @@ class SAFXDatabase:
         messages = []
 
         for stmt in stmts:
-            stmt_head = strip_leading_sql_line_comments(stmt)
-            upper = stmt_head.upper()
+            upper = stmt.upper()
             if upper == 'BEGIN' or upper.startswith('BEGIN '):
                 _, msg = self.begin()
                 messages.append(msg)
@@ -548,133 +462,30 @@ class SAFXDatabase:
                 try:
                     cur = self.conn.cursor()
                     cur.execute(stmt)
-                    if cur.description is not None:
+                    if (upper.startswith('SELECT') or upper.startswith('EXPLAIN')
+                            or upper.startswith('WITH') or upper.startswith('PRAGMA')):
                         last_rows = [tuple(r) for r in cur.fetchall()]
-                        last_cols = [d[0] for d in cur.description]
+                        last_cols = [d[0] for d in cur.description] if cur.description else []
                         messages.append(f'SELECT: {len(last_rows)} linha(s)')
                     else:
+                        affected = cur.rowcount if cur.rowcount >= 0 else 0
                         tx_note = " [pendente]" if self._in_manual_transaction else ""
-                        st_upper = stmt_head.upper()
-                        first_tok = st_upper.split(None, 1)[0] if st_upper else ''
-                        if first_tok in (
-                                'CREATE', 'DROP', 'ALTER', 'REINDEX', 'VACUUM',
-                                'ANALYZE', 'ATTACH', 'DETACH'):
-                            messages.append(
-                                f'OK: DDL executado com sucesso.{tx_note}')
-                        else:
-                            affected = cur.rowcount if cur.rowcount >= 0 else 0
-                            messages.append(
-                                f'OK: {affected} linha(s) afetada(s){tx_note}')
+                        messages.append(f'OK: {affected} linha(s) afetada(s){tx_note}')
                 except sqlite3.Error as e:
-                    messages.append(format_sqlite_error(e))
+                    messages.append(f'Erro: {e}')
 
         summary = ' | '.join(messages)
         if last_cols:
             return last_cols, last_rows, summary
         return [], [], summary
 
-    @staticmethod
-    def _normalize_sql_table_ident(raw: str) -> str:
-        t = raw.strip()
-        if t.startswith('"') and t.endswith('"') and len(t) >= 2:
-            t = t[1:-1]
-        elif t.startswith('`') and t.endswith('`') and len(t) >= 2:
-            t = t[1:-1]
-        elif t.startswith('[') and t.endswith(']') and len(t) >= 2:
-            t = t[1:-1]
-        return t.strip()
-
-    def _resolve_physical_table_locked(self, t: str) -> Optional[str]:
-        """Resolve nome → tabela SQLite; chamar só com ``self._lock`` adquirido."""
-        if not t:
-            return None
-        row = self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND lower(name) = lower(?)",
-            (t,),
-        ).fetchone()
-        if row:
-            return str(row[0])
-        tl = t.lower()
-        pref = [n for n in self._external_tables if n.lower().startswith(tl)]
-        if len(pref) == 1:
-            return pref[0]
-        pref2 = [n for n in self._external_tables if tl.startswith(n.lower())]
-        if len(pref2) == 1:
-            return pref2[0]
-        return None
-
-    def resolve_sql_table_name(self, raw: str) -> Optional[str]:
-        """
-        Resolve um identificador escrito no SQL ao nome físico da tabela no SQLite.
-        Útil para JOIN com tabelas externas (case-insensitive e prefixo único).
-        """
-        t = self._normalize_sql_table_ident(raw)
-        if not t:
-            return None
-        with self._lock:
-            return self._resolve_physical_table_locked(t)
-
     def get_table_columns(self, table_name: str) -> List[str]:
-        """Lista colunas (sem _row_id). Externas usam layout temporário da importação."""
+        """Retorna lista de colunas da tabela (sem _row_id)."""
         with self._lock:
-            t = self._normalize_sql_table_ident(table_name)
-            if not t:
-                return []
-            phys = self._resolve_physical_table_locked(t) or t
-            schema = self._external_schemas.get(phys)
-            if schema is None:
-                for k, v in self._external_schemas.items():
-                    if k.lower() == phys.lower():
-                        schema = v
-                        break
-            if schema is not None:
-                return list(schema)
             cur = self.conn.cursor()
-            cur.execute(f'PRAGMA table_info("{phys}")')
+            cur.execute(f'PRAGMA table_info("{table_name}")')
             cols = [row[1] for row in cur.fetchall() if row[1] != ROW_ID_COL]
         return cols
-
-    def build_external_join_example_sql(
-        self, safx_table: str, ext_table: str, ext_columns: List[str],
-    ) -> str:
-        """
-        Exemplo de INNER JOIN: igualdades apenas entre colunas que existem
-        na SAFX e na externa (reduz linhas espúrias por cruzamento incompleto).
-        """
-        try:
-            safx_cols = set(self.get_table_columns(safx_table))
-        except Exception:
-            safx_cols = set()
-        ext_set = {c for c in (ext_columns or []) if c and c != ROW_ID_COL}
-        common: List[str] = []
-        priority = (
-            'COD_EMPRESA', 'COD_ESTAB', 'NUM_DOCFIS', 'SERIE_DOCF',
-            'DATA_FISCAL', 'COD_DOCTO', 'IND_FIS_JUR', 'COD_FIS_JUR',
-        )
-        for p in priority:
-            if p in safx_cols and p in ext_set and p not in common:
-                common.append(p)
-        for c in sorted(safx_cols & ext_set):
-            if c not in common:
-                common.append(c)
-        if common:
-            on_sql = ' AND\n  '.join(f's."{c}" = e."{c}"' for c in common)
-        else:
-            c0 = next(iter(ext_set), 'COL_0')
-            on_sql = f's.COD_ESTAB = e."{c0}"'
-        return (
-            f"\n-- Tabela externa «{ext_table}» ({len(ext_columns)} colunas)\n"
-            f"-- INNER JOIN: só retorna linhas em que todas as igualdades do ON batem "
-            f"na SAFX e na externa.\n"
-            f"-- Nunca iguale a mesma coluna do mesmo alias (ex.: s.X = s.X é sempre "
-            f"verdade e ignora a tabela externa).\n"
-            f"SELECT s.*, e.*\n"
-            f'FROM "{safx_table}" s\n'
-            f'INNER JOIN "{ext_table}" e\n'
-            f'  ON {on_sql}\n'
-            f"LIMIT 100;\n"
-        )
 
     def get_row_by_id(self, table_name: str, row_id: int) -> Optional[Dict]:
         """Retorna um registro pelo row_id."""
@@ -688,45 +499,24 @@ class SAFXDatabase:
 
     def get_rows_by_ids(self, table_name: str,
                         row_ids: List[int]) -> Tuple[List[str], List[tuple]]:
-        """Retorna registros pelos row_ids, na mesma ordem da lista (sem duplicar)."""
+        """Retorna registros específicos pelos row_ids."""
         if not row_ids:
             return [], []
-        ordered: List[int] = []
-        seen = set()
-        for rid in row_ids:
-            try:
-                ir = int(rid)
-            except (TypeError, ValueError):
-                continue
-            if ir not in seen:
-                seen.add(ir)
-                ordered.append(ir)
-        if not ordered:
-            return [], []
-        placeholders = ','.join('?' for _ in ordered)
+        placeholders = ','.join('?' for _ in row_ids)
         with self._lock:
             cur = self.conn.cursor()
             cur.execute(
                 f'SELECT * FROM "{table_name}" WHERE "{ROW_ID_COL}" IN ({placeholders})',
-                ordered,
+                row_ids
             )
-            fetched = cur.fetchall()
+            rows = cur.fetchall()
             cols = [d[0] for d in cur.description] if cur.description else []
-        try:
-            rid_idx = cols.index(ROW_ID_COL)
-        except ValueError:
-            return cols, [tuple(r) for r in fetched]
-        by_id = {tuple(r)[rid_idx]: tuple(r) for r in fetched}
-        rows_ordered = [by_id[i] for i in ordered if i in by_id]
-        return cols, rows_ordered
+        return cols, [tuple(r) for r in rows]
 
     def drop_table(self, table_name: str):
-        """Remove tabela do banco (SAFX ou externa) e layout temporário associado."""
-        safe = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
+        """Remove tabela do banco."""
         with self._lock:
             self.loaded_tables.pop(table_name, None)
-            self._external_tables.discard(safe)
-            self._external_schemas.pop(safe, None)
             try:
                 self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                 self.conn.execute("COMMIT")
@@ -736,61 +526,19 @@ class SAFXDatabase:
     def get_loaded_tables(self) -> List[str]:
         return list(self.loaded_tables.keys())
 
-    def list_sqlite_user_tables(self) -> List[str]:
-        """Tabelas de utilizador no ficheiro SQLite (exclui internas ``sqlite_*``)."""
-        with self._lock:
-            cur = self.conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND substr(name,1,7) != 'sqlite_' ORDER BY name COLLATE NOCASE"
-            )
-            return [str(r[0]) for r in cur.fetchall()]
-
-    def get_tables_for_sql_panel(self) -> List[str]:
-        """
-        Lista para o combo do editor SQL: SAFX na ordem de carga,
-        depois outras tabelas físicas (ex.: ``CREATE TABLE … AS SELECT`` para backup).
-        """
-        out: List[str] = []
-        seen: Set[str] = set()
-        for name in self.get_loaded_tables():
-            out.append(name)
-            seen.add(name)
-        for name in self.list_sqlite_user_tables():
-            if name not in seen:
-                out.append(name)
-                seen.add(name)
-        return out
-
     def get_schema_info(self, table_name: str) -> List[Dict]:
         """Retorna informações de esquema da tabela."""
         layout = self.loaded_tables.get(table_name)
-        if layout:
-            result = []
-            for f in layout.fields:
-                info = {
-                    'campo': f.name,
-                    'tipo': f.field_type,
-                    'tamanho': f.size_str,
-                    'obrigatorio': 'SIM' if f.is_mandatory else 'NÃO',
-                    'descricao': f.description[:60] + ('...' if len(f.description) > 60 else '')
-                }
-                result.append(info)
-            return result
-        # Tabela externa / sem layout SAFX: colunas via PRAGMA
-        with self._lock:
-            cur = self.conn.cursor()
-            cur.execute(f'PRAGMA table_info("{table_name}")')
-            prag = cur.fetchall()
+        if not layout:
+            return []
         result = []
-        for row in prag:
-            _cid, name, ctype, _notnull, _dflt, _pk = row
-            if name == ROW_ID_COL:
-                continue
-            result.append({
-                'campo': name,
-                'tipo': ctype or 'TEXT',
-                'tamanho': '',
-                'obrigatorio': 'NÃO',
-                'descricao': 'layout temporário (planilha externa)',
-            })
+        for f in layout.fields:
+            info = {
+                'campo': f.name,
+                'tipo': f.field_type,
+                'tamanho': f.size_str,
+                'obrigatorio': 'SIM' if f.is_mandatory else 'NÃO',
+                'descricao': f.description[:60] + ('...' if len(f.description) > 60 else '')
+            }
+            result.append(info)
         return result
