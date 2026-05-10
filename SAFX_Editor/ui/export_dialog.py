@@ -81,7 +81,7 @@ class ExportDialog(QDialog):
         self._avail_all: List[str] = []   # todos sem filtragem
 
         self.setWindowTitle(f"Exportar {table_name} — Formato Homologado")
-        self.setMinimumSize(860, 560)
+        self.setMinimumSize(720, 480)
         self.setSizeGripEnabled(True)
 
         # Detecta tema ativo
@@ -97,15 +97,19 @@ class ExportDialog(QDialog):
         self._setup_ui()
         self._load_defaults()
 
+    # Altura mínima garantida para o painel de preview (em px)
+    _PREVIEW_MIN_H = 160
+
     def showEvent(self, event):
         super().showEvent(event)
         screen = QApplication.primaryScreen()
         if screen:
             geo = screen.availableGeometry()
-            w = min(1100, int(geo.width() * 0.88))
-            h = min(820, int(geo.height() * 0.88))
-            w = max(w, 860)
-            h = max(h, 560)
+            # Garante que o diálogo nunca exceda a área disponível
+            w = min(int(geo.width() * 0.88), 1100)
+            h = min(int(geo.height() * 0.88), 820)
+            w = max(w, self.minimumWidth())
+            h = max(h, self.minimumHeight())
             self.resize(w, h)
             self.move(
                 geo.x() + (geo.width() - w) // 2,
@@ -113,12 +117,25 @@ class ExportDialog(QDialog):
             )
         if not self._splitter_initialized:
             self._splitter_initialized = True
-            # Aguarda o layout estar finalizado antes de aplicar tamanhos
             QTimer.singleShot(80, self._apply_splitter_sizes)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # NÃO reseta splitters no resize — deixa o usuário manter sua expansão
+
+    def _clamp_preview(self, pos: int, index: int):
+        """Garante que o preview nunca suma ao arrastar o splitter principal."""
+        if index != 1:
+            return
+        total = self._main_splitter.height()
+        if total <= 0:
+            return
+        if (total - pos) < self._PREVIEW_MIN_H:
+            safe = total - self._PREVIEW_MIN_H
+            # Bloqueia re-entrância
+            self._main_splitter.blockSignals(True)
+            self._main_splitter.setSizes([safe, self._PREVIEW_MIN_H])
+            self._main_splitter.blockSignals(False)
 
     def _apply_splitter_sizes(self):
         """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
@@ -798,7 +815,6 @@ class ExportDialog(QDialog):
             RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
 
         preview_w = QWidget()
-        preview_w.setMinimumHeight(150)
         prev_lay = QVBoxLayout(preview_w)
         prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
@@ -844,7 +860,7 @@ class ExportDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setFont(QFont("Consolas", 10))
-        self.preview_text.setMinimumHeight(70)
+        self.preview_text.setMinimumHeight(40)
         self.preview_text.setStyleSheet(
             f"QTextEdit{{background:{PREV_CODE_BG};color:{PREV_CODE_TXT};"
             f"border:1px solid {PREV_BD};border-radius:6px;"
@@ -865,6 +881,8 @@ class ExportDialog(QDialog):
         main_splitter.setStretchFactor(0, 3)
         main_splitter.setStretchFactor(1, 1)
         self._main_splitter = main_splitter
+        # Trava em tempo real: o preview nunca some ao arrastar
+        main_splitter.splitterMoved.connect(self._clamp_preview)
 
         root.addWidget(main_splitter, 1)
 
