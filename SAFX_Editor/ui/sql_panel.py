@@ -6,16 +6,16 @@ import time
 from typing import List, Tuple, Optional
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRegularExpression, QTimer
-from PyQt6.QtGui import QCursor
 from PyQt6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                           QKeySequence, QAction, QIcon)
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                               QPlainTextEdit, QPushButton, QLabel,
                               QTableWidget, QTableWidgetItem, QHeaderView,
-                              QFrame, QComboBox, QSizePolicy, QToolButton,
+                              QFrame, QComboBox, QSizePolicy,
                               QToolBar, QStatusBar, QMessageBox, QApplication,
                               QMenu, QCheckBox, QSpinBox, QTextEdit,
-                              QAbstractItemView)
+                              QAbstractItemView, QDialog, QListWidget,
+                              QListWidgetItem)
 from PyQt6.QtCore import QPoint
 
 from core.database import SAFXDatabase
@@ -529,6 +529,139 @@ class TransactionManager:
         return self.db.rollback()
 
 
+class SnippetDialog(QDialog):
+    """Diálogo de seleção de snippets SQL.
+
+    Substitui QMenu/QToolButton que causavam crash nível-C++ no macOS/PyQt6.
+    QDialog tem ciclo de vida próprio e é totalmente estável em todas as
+    plataformas.
+    """
+
+    _SNIPPETS: List[Tuple[str, Optional[str]]] = [
+        ("── SELECT ──────────────────────────", None),
+        ("SELECT * (100 linhas)",
+         'SELECT * FROM "SAFX07" LIMIT 100'),
+        ("SELECT com filtro",
+         'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\'\nLIMIT 100'),
+        ("COUNT registros",
+         'SELECT COUNT(*) AS total FROM "SAFX07"'),
+        ("GROUP BY empresa / estab",
+         'SELECT COD_EMPRESA, COD_ESTAB, COUNT(*) AS qtd\n'
+         'FROM "SAFX07"\nGROUP BY COD_EMPRESA, COD_ESTAB'),
+        ("── UPDATE ──────────────────────────", None),
+        ("UPDATE campo unico",
+         'UPDATE "SAFX07"\nSET CAMPO = \'NOVO_VALOR\'\n'
+         'WHERE COD_EMPRESA = \'001\'\n  AND NUM_DOCFIS = \'000001\''),
+        ("UPDATE multiplos campos",
+         'UPDATE "SAFX07"\nSET CAMPO1 = \'VALOR1\',\n    CAMPO2 = \'VALOR2\'\n'
+         'WHERE _row_id = 1'),
+        ("SELECT antes de UPDATE",
+         'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\' LIMIT 10'),
+        ("── TRANSACAO ───────────────────────", None),
+        ("BEGIN + UPDATE + COMMIT",
+         'BEGIN;\nUPDATE "SAFX07"\nSET CAMPO = \'VALOR\'\n'
+         'WHERE COD_EMPRESA = \'001\';\nCOMMIT;'),
+        ("ROLLBACK (desfazer)",  'ROLLBACK;'),
+        ("COMMIT  (confirmar)",  'COMMIT;'),
+        ("── DIAGNOSTICO ─────────────────────", None),
+        ("PRAGMA table_info",
+         'PRAGMA table_info("SAFX07")'),
+        ("EXPLAIN QUERY PLAN",
+         'EXPLAIN QUERY PLAN SELECT * FROM "SAFX07" LIMIT 1'),
+        ("Duplicatas por chave",
+         'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS, COUNT(*) AS qtd\n'
+         'FROM "SAFX07"\n'
+         'GROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\n'
+         'HAVING COUNT(*) > 1'),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Snippets SQL")
+        self.setMinimumWidth(360)
+        self.setModal(True)
+        self._selected_sql: Optional[str] = None
+        self.setStyleSheet("QDialog { background:#13131f; }")
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        lbl = QLabel("Selecione um template e clique em Inserir:")
+        lbl.setStyleSheet(
+            "color:#cdd6f4; font-size:12px; font-weight:600;")
+        layout.addWidget(lbl)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            "QListWidget{"
+            "  background:#1e1e2e; color:#cdd6f4;"
+            "  border:1px solid #45475a; font-size:12px; outline:none;"
+            "}"
+            "QListWidget::item { padding:6px 12px; }"
+            "QListWidget::item:selected { background:#89b4fa; color:#1e1e2e; }"
+            "QListWidget::item:disabled { color:#585b70; }")
+        self._list.setMinimumHeight(300)
+
+        for label, sql in self._SNIPPETS:
+            item = QListWidgetItem(label)
+            if sql is None:
+                item.setFlags(
+                    item.flags()
+                    & ~Qt.ItemFlag.ItemIsSelectable
+                    & ~Qt.ItemFlag.ItemIsEnabled)
+                item.setForeground(QColor("#585b70"))
+            else:
+                item.setData(Qt.ItemDataRole.UserRole, sql)
+            self._list.addItem(item)
+
+        self._list.itemDoubleClicked.connect(self._on_double_click)
+        layout.addWidget(self._list)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        btn_cancel = QPushButton("Cancelar")
+        btn_cancel.setFixedHeight(32)
+        btn_cancel.setStyleSheet(
+            "background:#45475a; color:#cdd6f4; border:none;"
+            "border-radius:5px; padding:0 18px;"
+            "font-size:12px; font-weight:600;")
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_insert = QPushButton("Inserir no editor")
+        btn_insert.setFixedHeight(32)
+        btn_insert.setDefault(True)
+        btn_insert.setStyleSheet(
+            "background:#89b4fa; color:#1e1e2e; border:none;"
+            "border-radius:5px; padding:0 18px;"
+            "font-size:12px; font-weight:600;")
+        btn_insert.clicked.connect(self._on_insert)
+
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_insert)
+        layout.addLayout(btn_row)
+
+    def _on_double_click(self, item: QListWidgetItem):
+        sql = item.data(Qt.ItemDataRole.UserRole)
+        if sql:
+            self._selected_sql = sql
+            self.accept()
+
+    def _on_insert(self):
+        items = self._list.selectedItems()
+        if not items:
+            return
+        sql = items[0].data(Qt.ItemDataRole.UserRole)
+        if sql:
+            self._selected_sql = sql
+            self.accept()
+
+    def selected_sql(self) -> Optional[str]:
+        return self._selected_sql
+
+
 class SQLPanel(QWidget):
     """Painel completo do editor SQL com toolbar profissional."""
 
@@ -608,19 +741,11 @@ class SQLPanel(QWidget):
 
         tb.addWidget(self._sep())
 
-        # ── Snippets — QToolButton com menu nativo (estável em macOS/Qt6) ──
-        self.btn_snippets = QToolButton()
-        self.btn_snippets.setText("Snippets")
-        self.btn_snippets.setToolTip("Inserir template SQL pronto")
-        self.btn_snippets.setPopupMode(
-            QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.btn_snippets.setStyleSheet(
-            "QToolButton{background:#a6adc8;color:#1e1e2e;border:none;"
-            "border-radius:5px;padding:4px 10px;font-size:12px;font-weight:600;}"
-            "QToolButton:hover{background:#bac2de;}"
-            "QToolButton::menu-indicator{width:0px;}")
-        self._snippets_menu = self._build_snippets_menu()
-        self.btn_snippets.setMenu(self._snippets_menu)
+        # ── Snippets — abre QDialog (evita crash C++/macOS do QMenu) ──
+        self.btn_snippets = self._make_btn(
+            "Snippets", "#a6adc8", "#1e1e2e",
+            "Inserir template SQL pronto (abre janela de selecao)", width=90)
+        self.btn_snippets.clicked.connect(self._show_snippets_dialog)
         tb.addWidget(self.btn_snippets)
 
         tb.addStretch()
@@ -926,53 +1051,14 @@ class SQLPanel(QWidget):
     def _toggle_comment(self):
         self.editor._toggle_comment()
 
-    def _build_snippets_menu(self) -> QMenu:
-        """Monta o menu de snippets uma vez. QToolButton.setMenu() garante
-        comportamento nativo no macOS sem precisar de exec() manual."""
-        menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu{background:#1e1e2e;border:1px solid #45475a;padding:4px;}"
-            "QMenu::item{padding:6px 24px 6px 12px;color:#cdd6f4;}"
-            "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
-            "QMenu::item:disabled{color:#6c7086;}"
-            "QMenu::separator{height:1px;background:#45475a;margin:3px 6px;}")
-
-        def sep(title: str):
-            menu.addSeparator()
-            a = menu.addAction(title)
-            a.setEnabled(False)
-
-        def add(label: str, sql: str):
-            a = menu.addAction(f"  {label}")
-            # Captura por valor via default arg — evita closure bug em PyQt6
-            a.triggered.connect(lambda checked=False, s=sql:
-                                self.editor.insert_snippet(s))
-
-        # Os templates usam placeholder genérico; a tabela real é inserida
-        # pelo usuário. Não depende de self._current_table() aqui pois o
-        # menu é criado uma vez (antes de qualquer tabela ser carregada).
-        sep("SELECT")
-        add("SELECT * (100 linhas)",       'SELECT * FROM "SAFX07" LIMIT 100')
-        add("SELECT com filtro",           'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\'\nLIMIT 100')
-        add("COUNT registros",             'SELECT COUNT(*) AS total FROM "SAFX07"')
-        add("GROUP BY empresa/estab",      'SELECT COD_EMPRESA, COD_ESTAB, COUNT(*) AS qtd\nFROM "SAFX07"\nGROUP BY COD_EMPRESA, COD_ESTAB')
-
-        sep("UPDATE")
-        add("UPDATE campo unico",          'UPDATE "SAFX07"\nSET CAMPO = \'NOVO_VALOR\'\nWHERE COD_EMPRESA = \'001\'\n  AND NUM_DOCFIS = \'000001\'')
-        add("UPDATE multiplos campos",     'UPDATE "SAFX07"\nSET CAMPO1 = \'VALOR1\',\n    CAMPO2 = \'VALOR2\'\nWHERE _row_id = 1')
-        add("SELECT antes de UPDATE",      'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\' LIMIT 10')
-
-        sep("TRANSACAO")
-        add("BEGIN + UPDATE + COMMIT",     'BEGIN;\nUPDATE "SAFX07"\nSET CAMPO = \'VALOR\'\nWHERE COD_EMPRESA = \'001\';\nCOMMIT;')
-        add("ROLLBACK (desfazer)",         'ROLLBACK;')
-        add("COMMIT (confirmar)",          'COMMIT;')
-
-        sep("DIAGNOSTICO")
-        add("PRAGMA table_info",           'PRAGMA table_info("SAFX07")')
-        add("EXPLAIN QUERY PLAN",          'EXPLAIN QUERY PLAN SELECT * FROM "SAFX07" LIMIT 1')
-        add("Duplicatas por chave",        'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS, COUNT(*) AS qtd\nFROM "SAFX07"\nGROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\nHAVING COUNT(*) > 1')
-
-        return menu
+    def _show_snippets_dialog(self):
+        """Abre o diálogo de snippets. QDialog é 100 % estável no macOS —
+        evita o crash C++ (segfault) que ocorria com QMenu/QToolButton."""
+        dlg = SnippetDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            sql = dlg.selected_sql()
+            if sql:
+                self.editor.insert_snippet(sql)
 
     def _current_table(self) -> str:
         t = self.combo_tables.currentText()
