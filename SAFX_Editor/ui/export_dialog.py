@@ -272,9 +272,12 @@ class ExportDialog(QDialog):
 
         # ── Área superior: Config + Campos ──
         top_w = QWidget()
+        # Força mínimo menor que o layout computaria (~350px).
+        # Isso libera o handle para mover ~200px para cima/baixo.
+        top_w.setMinimumHeight(140)
         top_lay = QVBoxLayout(top_w)
-        top_lay.setContentsMargins(14, 8, 14, 4)
-        top_lay.setSpacing(6)
+        top_lay.setContentsMargins(14, 6, 14, 2)
+        top_lay.setSpacing(4)
 
         # ── Modo de exportação — cards visuais ────────────────────────────────
         mode_group = QGroupBox("Modo de Exportação")
@@ -611,8 +614,8 @@ class ExportDialog(QDialog):
         avail_header.setStyleSheet(
             f"background:{F_HDR_BG}; border-radius:8px 8px 0 0;")
         avail_h = QVBoxLayout(avail_header)
-        avail_h.setContentsMargins(10, 8, 10, 6)
-        avail_h.setSpacing(6)
+        avail_h.setContentsMargins(10, 4, 10, 4)
+        avail_h.setSpacing(3)
 
         lbl_avail = QLabel("📋  Campos Disponíveis")
         lbl_avail.setStyleSheet(
@@ -621,7 +624,7 @@ class ExportDialog(QDialog):
         avail_h.addWidget(lbl_avail)
 
         self.search_edit = QLineEdit()
-        self.search_edit.setFixedHeight(32)
+        self.search_edit.setFixedHeight(26)
         self.search_edit.setPlaceholderText("🔍  Buscar campo...")
         self.search_edit.setStyleSheet(
             f"QLineEdit{{background:{F_SRCH_BG};color:{F_SRCH_TXT};"
