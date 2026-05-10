@@ -56,12 +56,17 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Icone do executavel: usa adejo_icon.ico no Windows, app_icon.icns no Mac
+_ico_win = ROOT / "assets" / "adejo_icon.ico"
+_icon_exe = str(_ico_win) if _ico_win.is_file() else None
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
     name="SAFX_Editor",
+    icon=_icon_exe,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
