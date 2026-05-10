@@ -250,17 +250,14 @@ class SQLEditor(QPlainTextEdit):
         # Tab = 4 espaços
         if key == Qt.Key.Key_Tab and not (mods & Qt.KeyboardModifier.ShiftModifier):
             self.insertPlainText('    ')
-            self._refresh_column_completer_if_popup_visible()
             return
 
         # Shift+Tab = remove 4 espaços
         if key == Qt.Key.Key_Backtab:
             self._unindent()
-            self._refresh_column_completer_if_popup_visible()
             return
 
         super().keyPressEvent(event)
-        self._refresh_column_completer_if_popup_visible()
 
     def _toggle_comment(self):
         cursor = self.textCursor()
