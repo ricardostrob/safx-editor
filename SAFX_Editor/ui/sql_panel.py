@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
                               QToolBar, QStatusBar, QMessageBox, QApplication,
                               QMenu, QCheckBox, QSpinBox, QTextEdit,
                               QAbstractItemView)
+from PyQt6.QtCore import QPoint
 
 from core.database import SAFXDatabase
 from ui.styles import (SQL_KEYWORD_COLOR, SQL_STRING_COLOR, SQL_NUMBER_COLOR,
@@ -607,11 +608,19 @@ class SQLPanel(QWidget):
 
         tb.addWidget(self._sep())
 
-        # ── Snippets ──
-        self.btn_snippets = self._make_btn(
-            "⬦ Snippets", "#a6adc8", "#1e1e2e",
-            "Inserir template SQL pronto", width=90)
-        self.btn_snippets.clicked.connect(self._show_snippets_menu)
+        # ── Snippets — QToolButton com menu nativo (estável em macOS/Qt6) ──
+        self.btn_snippets = QToolButton()
+        self.btn_snippets.setText("Snippets")
+        self.btn_snippets.setToolTip("Inserir template SQL pronto")
+        self.btn_snippets.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_snippets.setStyleSheet(
+            "QToolButton{background:#a6adc8;color:#1e1e2e;border:none;"
+            "border-radius:5px;padding:4px 10px;font-size:12px;font-weight:600;}"
+            "QToolButton:hover{background:#bac2de;}"
+            "QToolButton::menu-indicator{width:0px;}")
+        self._snippets_menu = self._build_snippets_menu()
+        self.btn_snippets.setMenu(self._snippets_menu)
         tb.addWidget(self.btn_snippets)
 
         tb.addStretch()
@@ -917,72 +926,53 @@ class SQLPanel(QWidget):
     def _toggle_comment(self):
         self.editor._toggle_comment()
 
-    def _show_snippets_menu(self):
-        """Abre menu de snippets SQL. Usa QCursor.pos() para compatibilidade macOS."""
-        try:
-            table = self._current_table()
-            menu = QMenu(self)
-            menu.setStyleSheet(
-                "QMenu{background:#1e1e2e;border:1px solid #45475a;padding:4px;}"
-                "QMenu::item{padding:6px 20px 6px 12px;color:#cdd6f4;}"
-                "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
-                "QMenu::item:disabled{color:#6c7086;font-weight:bold;}"
-                "QMenu::separator{height:1px;background:#45475a;margin:3px 6px;}")
+    def _build_snippets_menu(self) -> QMenu:
+        """Monta o menu de snippets uma vez. QToolButton.setMenu() garante
+        comportamento nativo no macOS sem precisar de exec() manual."""
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu{background:#1e1e2e;border:1px solid #45475a;padding:4px;}"
+            "QMenu::item{padding:6px 24px 6px 12px;color:#cdd6f4;}"
+            "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
+            "QMenu::item:disabled{color:#6c7086;}"
+            "QMenu::separator{height:1px;background:#45475a;margin:3px 6px;}")
 
-            def sep(title: str):
-                menu.addSeparator()
-                a = menu.addAction(f"  {title}")
-                a.setEnabled(False)
+        def sep(title: str):
+            menu.addSeparator()
+            a = menu.addAction(title)
+            a.setEnabled(False)
 
-            def add(label: str, sql: str):
-                a = menu.addAction(f"    {label}")
-                # Default arg captura sql por valor (evita closure bug)
-                a.triggered.connect(lambda checked=False, s=sql:
-                                    self.editor.insert_snippet(s))
+        def add(label: str, sql: str):
+            a = menu.addAction(f"  {label}")
+            # Captura por valor via default arg — evita closure bug em PyQt6
+            a.triggered.connect(lambda checked=False, s=sql:
+                                self.editor.insert_snippet(s))
 
-            sep("SELECT")
-            add("SELECT * (100 linhas)",
-                f'SELECT * FROM "{table}" LIMIT 100')
-            add("SELECT com filtro",
-                f'SELECT * FROM "{table}"\nWHERE COD_EMPRESA = \'001\'\nLIMIT 100')
-            add("COUNT registros",
-                f'SELECT COUNT(*) AS total FROM "{table}"')
-            add("GROUP BY empresa/estab",
-                f'SELECT COD_EMPRESA, COD_ESTAB, COUNT(*) AS qtd\n'
-                f'FROM "{table}"\nGROUP BY COD_EMPRESA, COD_ESTAB')
+        # Os templates usam placeholder genérico; a tabela real é inserida
+        # pelo usuário. Não depende de self._current_table() aqui pois o
+        # menu é criado uma vez (antes de qualquer tabela ser carregada).
+        sep("SELECT")
+        add("SELECT * (100 linhas)",       'SELECT * FROM "SAFX07" LIMIT 100')
+        add("SELECT com filtro",           'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\'\nLIMIT 100')
+        add("COUNT registros",             'SELECT COUNT(*) AS total FROM "SAFX07"')
+        add("GROUP BY empresa/estab",      'SELECT COD_EMPRESA, COD_ESTAB, COUNT(*) AS qtd\nFROM "SAFX07"\nGROUP BY COD_EMPRESA, COD_ESTAB')
 
-            sep("UPDATE")
-            add("UPDATE campo unico",
-                f'UPDATE "{table}"\nSET CAMPO = \'NOVO_VALOR\'\n'
-                f'WHERE COD_EMPRESA = \'001\'\n  AND NUM_DOCFIS = \'000001\'')
-            add("UPDATE multiplos campos",
-                f'UPDATE "{table}"\nSET CAMPO1 = \'VALOR1\',\n'
-                f'    CAMPO2 = \'VALOR2\'\nWHERE _row_id = 1')
-            add("SELECT antes de UPDATE",
-                f'SELECT * FROM "{table}"\n'
-                f'WHERE COD_EMPRESA = \'001\' LIMIT 10')
+        sep("UPDATE")
+        add("UPDATE campo unico",          'UPDATE "SAFX07"\nSET CAMPO = \'NOVO_VALOR\'\nWHERE COD_EMPRESA = \'001\'\n  AND NUM_DOCFIS = \'000001\'')
+        add("UPDATE multiplos campos",     'UPDATE "SAFX07"\nSET CAMPO1 = \'VALOR1\',\n    CAMPO2 = \'VALOR2\'\nWHERE _row_id = 1')
+        add("SELECT antes de UPDATE",      'SELECT * FROM "SAFX07"\nWHERE COD_EMPRESA = \'001\' LIMIT 10')
 
-            sep("TRANSACAO")
-            add("BEGIN + UPDATE + COMMIT",
-                f'BEGIN;\nUPDATE "{table}"\nSET CAMPO = \'VALOR\'\n'
-                f'WHERE COD_EMPRESA = \'001\';\nCOMMIT;')
-            add("ROLLBACK (desfazer)", 'ROLLBACK;')
-            add("COMMIT (confirmar)",  'COMMIT;')
+        sep("TRANSACAO")
+        add("BEGIN + UPDATE + COMMIT",     'BEGIN;\nUPDATE "SAFX07"\nSET CAMPO = \'VALOR\'\nWHERE COD_EMPRESA = \'001\';\nCOMMIT;')
+        add("ROLLBACK (desfazer)",         'ROLLBACK;')
+        add("COMMIT (confirmar)",          'COMMIT;')
 
-            sep("DIAGNOSTICO")
-            add("PRAGMA table_info",   f'PRAGMA table_info("{table}")')
-            add("EXPLAIN QUERY PLAN",
-                f'EXPLAIN QUERY PLAN SELECT * FROM "{table}" LIMIT 1')
-            add("Duplicatas por chave",
-                f'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS, COUNT(*) AS qtd\n'
-                f'FROM "{table}"\n'
-                f'GROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\nHAVING COUNT(*) > 1')
+        sep("DIAGNOSTICO")
+        add("PRAGMA table_info",           'PRAGMA table_info("SAFX07")')
+        add("EXPLAIN QUERY PLAN",          'EXPLAIN QUERY PLAN SELECT * FROM "SAFX07" LIMIT 1')
+        add("Duplicatas por chave",        'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS, COUNT(*) AS qtd\nFROM "SAFX07"\nGROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\nHAVING COUNT(*) > 1')
 
-            # QCursor.pos() é mais estável que mapToGlobal em macOS/Qt6
-            menu.exec(QCursor.pos())
-
-        except Exception as e:
-            logger.error("Snippets menu erro: %s", e, exc_info=True)
+        return menu
 
     def _current_table(self) -> str:
         t = self.combo_tables.currentText()
