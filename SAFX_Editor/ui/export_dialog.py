@@ -106,7 +106,7 @@ class ExportDialog(QDialog):
         self._load_defaults()
 
     # Altura mínima garantida para o painel de preview (em px)
-    _PREVIEW_MIN_H = 160
+    _PREVIEW_MIN_H = 90
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -132,18 +132,19 @@ class ExportDialog(QDialog):
         # NÃO reseta splitters no resize — deixa o usuário manter sua expansão
 
     def _clamp_preview(self, pos: int, index: int):
-        """Garante que o preview nunca suma ao arrastar o splitter principal."""
+        """Garante que o preview nunca suma ao arrastar o splitter principal.
+        Usa QTimer para não interromper o evento de drag do mouse."""
         if index != 1:
             return
         total = self._main_splitter.height()
         if total <= 0:
             return
         if (total - pos) < self._PREVIEW_MIN_H:
-            safe = total - self._PREVIEW_MIN_H
-            # Bloqueia re-entrância
-            self._main_splitter.blockSignals(True)
-            self._main_splitter.setSizes([safe, self._PREVIEW_MIN_H])
-            self._main_splitter.blockSignals(False)
+            min_h = self._PREVIEW_MIN_H
+            QTimer.singleShot(0, lambda: (
+                self._main_splitter.setSizes([total - min_h, min_h])
+                if hasattr(self, '_main_splitter') else None
+            ))
 
     def _apply_splitter_sizes(self):
         """Distribui o espaço dos splitters proporcionalmente — chamado apenas uma vez na abertura."""
@@ -271,13 +272,18 @@ class ExportDialog(QDialog):
         # SPLITTER PRINCIPAL: [Config + Campos] | [Preview]
         # ══════════════════════════════════════════════════════════════
         main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setHandleWidth(6)
+        main_splitter.setHandleWidth(10)
         main_splitter.setStyleSheet(
             "QSplitter::handle:vertical {"
-            "  background:#26263a; border-top:1px solid #45475a;"
-            "  border-bottom:1px solid #45475a;"
+            "  background:#313244;"
+            "  border-top:1px solid #585b70;"
+            "  border-bottom:1px solid #585b70;"
             "}"
-            "QSplitter::handle:vertical:hover { background:#1e3a5a; }")
+            "QSplitter::handle:vertical:hover {"
+            "  background:#45475a;"
+            "  border-top:2px solid #89b4fa;"
+            "  border-bottom:2px solid #89b4fa;"
+            "}")
 
         # ── Área superior: Config + Campos ──
         top_w = QWidget()
