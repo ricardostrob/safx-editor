@@ -35,8 +35,8 @@ class FieldListWidget(QListWidget):
         super().__init__(parent)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.setMinimumWidth(160)
-        self.setMinimumHeight(80)
+        self.setMinimumWidth(120)
+        self.setMinimumHeight(40)   # reduzido para permitir arrastar preview para cima
         self.setFont(QFont("Consolas", 11))
 
     def get_fields(self) -> List[str]:
@@ -83,6 +83,14 @@ class ExportDialog(QDialog):
         self.setWindowTitle(f"Exportar {table_name} — Formato Homologado")
         self.setMinimumSize(720, 480)
         self.setSizeGripEnabled(True)
+        # Adiciona botões Minimizar e Maximizar (ausentes em QDialog por padrão)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowTitleHint |
+            Qt.WindowType.WindowCloseButtonHint |
+            Qt.WindowType.WindowMaximizeButtonHint |
+            Qt.WindowType.WindowMinimizeButtonHint
+        )
 
         # Detecta tema ativo
         from core.config import AppConfig
@@ -640,8 +648,8 @@ class ExportDialog(QDialog):
         avail_lay.addWidget(avail_header)
 
         self.list_avail = QListWidget()
-        self.list_avail.setMinimumWidth(180)
-        self.list_avail.setMinimumHeight(100)
+        self.list_avail.setMinimumWidth(140)
+        self.list_avail.setMinimumHeight(40)
         self.list_avail.setFont(QFont("Consolas", 11))
         self.list_avail.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -743,7 +751,7 @@ class ExportDialog(QDialog):
         key_lay.addWidget(key_hdr)
 
         self.list_keys = FieldListWidget()
-        self.list_keys.setMinimumHeight(100)
+        self.list_keys.setMinimumHeight(40)
         self.list_keys.itemDoubleClicked.connect(self._remove_key)
         self.list_keys.setStyleSheet(
             f"QListWidget{{background:{F_LIST_BG};border:1px solid {KEY_LIST_BD};"
@@ -778,7 +786,7 @@ class ExportDialog(QDialog):
         chg_lay.addWidget(chg_hdr)
 
         self.list_changes = FieldListWidget()
-        self.list_changes.setMinimumHeight(100)
+        self.list_changes.setMinimumHeight(40)
         self.list_changes.itemDoubleClicked.connect(self._remove_change)
         self.list_changes.setStyleSheet(
             f"QListWidget{{background:{F_LIST_BG};border:1px solid {CHG_LIST_BD};"
