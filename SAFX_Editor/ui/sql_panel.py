@@ -6,6 +6,7 @@ import time
 from typing import List, Tuple, Optional
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QRegularExpression, QTimer
+from PyQt6.QtGui import QCursor
 from PyQt6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                           QKeySequence, QAction, QIcon)
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -917,93 +918,71 @@ class SQLPanel(QWidget):
         self.editor._toggle_comment()
 
     def _show_snippets_menu(self):
+        """Abre menu de snippets SQL. Usa QCursor.pos() para compatibilidade macOS."""
         try:
+            table = self._current_table()
             menu = QMenu(self)
             menu.setStyleSheet(
-                "QMenu{background:#1e1e2e;border:1px solid #45475a;"
-                "border-radius:6px;padding:4px;}"
-                "QMenu::item{padding:6px 20px 6px 12px;color:#cdd6f4;border-radius:4px;}"
+                "QMenu{background:#1e1e2e;border:1px solid #45475a;padding:4px;}"
+                "QMenu::item{padding:6px 20px 6px 12px;color:#cdd6f4;}"
                 "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
-                "QMenu::item:disabled{color:#585b70;}"
-                "QMenu::separator{height:1px;background:#45475a;margin:4px 8px;}")
+                "QMenu::item:disabled{color:#6c7086;font-weight:bold;}"
+                "QMenu::separator{height:1px;background:#45475a;margin:3px 6px;}")
 
-            def _sep(title: str):
-                """Separador com título (compatível com PyQt6 macOS)."""
+            def sep(title: str):
                 menu.addSeparator()
-                hdr = menu.addAction(title)
-                hdr.setEnabled(False)
-                hdr.setFont(QFont("Consolas", 9))
+                a = menu.addAction(f"  {title}")
+                a.setEnabled(False)
 
             def add(label: str, sql: str):
-                act = menu.addAction(label)
-                # Captura explícita de sql evita bug de closure em loops
-                # checked=False necessário: triggered emite bool no PyQt6
-                act.triggered.connect(
-                    lambda checked=False, s=sql: self.editor.insert_snippet(s))
+                a = menu.addAction(f"    {label}")
+                # Default arg captura sql por valor (evita closure bug)
+                a.triggered.connect(lambda checked=False, s=sql:
+                                    self.editor.insert_snippet(s))
 
-            table = self._current_table()
-
-            _sep("SELECT")
-            add('SELECT * (100 linhas)',
+            sep("SELECT")
+            add("SELECT * (100 linhas)",
                 f'SELECT * FROM "{table}" LIMIT 100')
-            add('SELECT com filtro',
+            add("SELECT com filtro",
                 f'SELECT * FROM "{table}"\nWHERE COD_EMPRESA = \'001\'\nLIMIT 100')
-            add('COUNT registros',
+            add("COUNT registros",
                 f'SELECT COUNT(*) AS total FROM "{table}"')
-            add('SELECT campos especificos',
-                f'SELECT COD_EMPRESA, COD_ESTAB, DATA_FISCAL,\n'
-                f'       NUM_DOCFIS, SERIE_DOCFIS\nFROM "{table}"\nLIMIT 100')
-            add('GROUP BY empresa/estab',
-                f'SELECT COD_EMPRESA, COD_ESTAB,\n'
-                f'       COUNT(*) AS qtd\nFROM "{table}"\n'
-                f'GROUP BY COD_EMPRESA, COD_ESTAB\nORDER BY COD_EMPRESA')
+            add("GROUP BY empresa/estab",
+                f'SELECT COD_EMPRESA, COD_ESTAB, COUNT(*) AS qtd\n'
+                f'FROM "{table}"\nGROUP BY COD_EMPRESA, COD_ESTAB')
 
-            _sep("UPDATE")
-            add('UPDATE campo unico',
+            sep("UPDATE")
+            add("UPDATE campo unico",
                 f'UPDATE "{table}"\nSET CAMPO = \'NOVO_VALOR\'\n'
                 f'WHERE COD_EMPRESA = \'001\'\n  AND NUM_DOCFIS = \'000001\'')
-            add('UPDATE multiplos campos',
+            add("UPDATE multiplos campos",
                 f'UPDATE "{table}"\nSET CAMPO1 = \'VALOR1\',\n'
                 f'    CAMPO2 = \'VALOR2\'\nWHERE _row_id = 1')
-            add('UPDATE verificar antes (SELECT)',
-                f'-- Verifique primeiro:\nSELECT * FROM "{table}"\n'
-                f'WHERE COD_EMPRESA = \'001\' LIMIT 10\n\n'
-                f'-- Depois execute:\n-- UPDATE "{table}" SET CAMPO = \'VALOR\'\n'
-                f'-- WHERE COD_EMPRESA = \'001\'')
-
-            _sep("TRANSACAO")
-            add('BEGIN + UPDATE + COMMIT',
-                f'BEGIN;\n\nUPDATE "{table}"\nSET CAMPO = \'VALOR\'\n'
-                f'WHERE COD_EMPRESA = \'001\';\n\n'
-                f'SELECT * FROM "{table}" WHERE COD_EMPRESA = \'001\' LIMIT 5;\n\n'
-                f'COMMIT;')
-            add('ROLLBACK (desfazer)',
-                'ROLLBACK;')
-            add('COMMIT (confirmar)',
-                'COMMIT;')
-
-            _sep("DIAGNOSTICO")
-            add('EXPLAIN QUERY PLAN',
-                f'EXPLAIN QUERY PLAN\n'
-                f'SELECT * FROM "{table}" WHERE COD_EMPRESA = \'001\'')
-            add('Informacoes da tabela',
-                f'PRAGMA table_info("{table}")')
-            add('Contar por status/campo',
-                f'SELECT SITUACAO, COUNT(*) AS qtd\nFROM "{table}"\n'
-                f'GROUP BY SITUACAO\nORDER BY qtd DESC')
-            add('Duplicatas por chave',
-                f'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS,\n'
-                f'       COUNT(*) AS qtd\nFROM "{table}"\n'
-                f'GROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\n'
-                f'HAVING COUNT(*) > 1')
-            add('Valores nulos/vazios',
+            add("SELECT antes de UPDATE",
                 f'SELECT * FROM "{table}"\n'
-                f'WHERE COD_EMPRESA = \'\' OR COD_EMPRESA IS NULL\nLIMIT 100')
+                f'WHERE COD_EMPRESA = \'001\' LIMIT 10')
 
-            menu.exec(self.btn_snippets.mapToGlobal(
-                self.btn_snippets.rect().bottomLeft()))
+            sep("TRANSACAO")
+            add("BEGIN + UPDATE + COMMIT",
+                f'BEGIN;\nUPDATE "{table}"\nSET CAMPO = \'VALOR\'\n'
+                f'WHERE COD_EMPRESA = \'001\';\nCOMMIT;')
+            add("ROLLBACK (desfazer)", 'ROLLBACK;')
+            add("COMMIT (confirmar)",  'COMMIT;')
+
+            sep("DIAGNOSTICO")
+            add("PRAGMA table_info",   f'PRAGMA table_info("{table}")')
+            add("EXPLAIN QUERY PLAN",
+                f'EXPLAIN QUERY PLAN SELECT * FROM "{table}" LIMIT 1')
+            add("Duplicatas por chave",
+                f'SELECT COD_EMPRESA, COD_ESTAB, NUM_DOCFIS, COUNT(*) AS qtd\n'
+                f'FROM "{table}"\n'
+                f'GROUP BY COD_EMPRESA, COD_ESTAB, NUM_DOCFIS\nHAVING COUNT(*) > 1')
+
+            # QCursor.pos() é mais estável que mapToGlobal em macOS/Qt6
+            menu.exec(QCursor.pos())
+
         except Exception as e:
-            logger.error("Erro ao abrir menu Snippets: %s", e, exc_info=True)
+            logger.error("Snippets menu erro: %s", e, exc_info=True)
 
     def _current_table(self) -> str:
         t = self.combo_tables.currentText()
