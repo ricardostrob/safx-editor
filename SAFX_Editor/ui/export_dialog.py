@@ -798,7 +798,7 @@ class ExportDialog(QDialog):
             RST_BTN_BD = "#b8bcd0"; RST_BTN_HVR = "#c8cbdc"
 
         preview_w = QWidget()
-        preview_w.setMinimumHeight(80)  # impede sumir ao arrastar splitter
+        preview_w.setMinimumHeight(150)
         prev_lay = QVBoxLayout(preview_w)
         prev_lay.setContentsMargins(14, 8, 14, 8)
         prev_lay.setSpacing(6)
@@ -844,7 +844,7 @@ class ExportDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setFont(QFont("Consolas", 10))
-        self.preview_text.setMinimumHeight(40)
+        self.preview_text.setMinimumHeight(70)
         self.preview_text.setStyleSheet(
             f"QTextEdit{{background:{PREV_CODE_BG};color:{PREV_CODE_TXT};"
             f"border:1px solid {PREV_BD};border-radius:6px;"
@@ -862,6 +862,8 @@ class ExportDialog(QDialog):
         main_splitter.addWidget(preview_w)
         main_splitter.setCollapsible(0, False)
         main_splitter.setCollapsible(1, False)
+        main_splitter.setStretchFactor(0, 3)
+        main_splitter.setStretchFactor(1, 1)
         self._main_splitter = main_splitter
 
         root.addWidget(main_splitter, 1)
