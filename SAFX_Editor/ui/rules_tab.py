@@ -25,10 +25,10 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QSortFilterProxyModel, QStringListModel
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
+    QCheckBox, QComboBox, QCompleter, QDialog, QDialogButtonBox, QFrame,
     QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMessageBox, QPushButton,
     QRadioButton, QScrollArea, QSizePolicy, QSplitter,
@@ -88,6 +88,36 @@ def _combo(items: Optional[List[str]] = None) -> QComboBox:
     return c
 
 
+def _field_combo(items: Optional[List[str]] = None) -> QComboBox:
+    """Combo editável com busca incremental ao digitar (filtra por contains)."""
+    c = QComboBox()
+    c.setEditable(True)
+    c.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+    c.setFixedHeight(28)
+    c.setStyleSheet(
+        f"QComboBox{{background:{_OVERLAY};color:{_TEXT};border:1px solid {_BORDER};"
+        f"border-radius:4px;padding:0 6px;font-size:12px;}}"
+        f"QComboBox::drop-down{{border:none;width:18px;}}"
+        f"QComboBox QAbstractItemView{{background:{_SURFACE};color:{_TEXT};"
+        f"selection-background-color:{_ACCENT};selection-color:{_DARK};"
+        f"font-size:12px;min-width:160px;}}"
+        f"QLineEdit{{background:{_OVERLAY};color:{_TEXT};border:none;"
+        f"padding:0 4px;font-size:12px;}}")
+    field_items = items or []
+    c.addItems(field_items)
+
+    # Completer com filtro "contains" (não só prefixo)
+    completer = QCompleter(field_items, c)
+    completer.setFilterMode(Qt.MatchFlag.MatchContains)
+    completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+    completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+    completer.popup().setStyleSheet(
+        f"background:{_SURFACE};color:{_TEXT};font-size:12px;"
+        f"selection-background-color:{_ACCENT};selection-color:{_DARK};")
+    c.setCompleter(completer)
+    return c
+
+
 def _line(placeholder: str = "") -> QLineEdit:
     e = QLineEdit()
     e.setPlaceholderText(placeholder)
@@ -128,8 +158,8 @@ class ConditionRow(QWidget):
         lay.setContentsMargins(0, 2, 0, 2)
         lay.setSpacing(4)
 
-        self.combo_field = _combo(self._columns)
-        self.combo_field.setMinimumWidth(120)
+        self.combo_field = _field_combo(self._columns)
+        self.combo_field.setMinimumWidth(140)
         lay.addWidget(self.combo_field)
 
         self.combo_op = _combo(list(CONDITION_OPS.values()))
@@ -163,11 +193,31 @@ class ConditionRow(QWidget):
             "value": self.edit_value.text(),
         }
 
+    def update_columns(self, columns: List[str]):
+        """Atualiza o combo de campo com novas colunas, preservando valor atual."""
+        self._columns = columns
+        cur = self.combo_field.currentText()
+        self.combo_field.blockSignals(True)
+        self.combo_field.clear()
+        self.combo_field.addItems(columns)
+        self.combo_field.blockSignals(False)
+        comp = self.combo_field.completer()
+        if comp:
+            from PyQt6.QtCore import QStringListModel
+            comp.setModel(QStringListModel(columns, comp))
+        idx = self.combo_field.findText(cur)
+        if idx >= 0:
+            self.combo_field.setCurrentIndex(idx)
+        elif self.combo_field.isEditable():
+            self.combo_field.setEditText(cur)
+
     def load_dict(self, d: Dict):
         col = d.get("field", "")
         idx = self.combo_field.findText(col)
         if idx >= 0:
             self.combo_field.setCurrentIndex(idx)
+        elif self.combo_field.isEditable():
+            self.combo_field.setEditText(col)
 
         op = d.get("op", "equals")
         op_keys = list(CONDITION_OPS.keys())
@@ -204,8 +254,8 @@ class ActionRow(QWidget):
 
         row1.addWidget(_lbl("→ campo:"))
 
-        self.combo_field = _combo(self._columns)
-        self.combo_field.setMinimumWidth(120)
+        self.combo_field = _field_combo(self._columns)
+        self.combo_field.setMinimumWidth(140)
         row1.addWidget(self.combo_field)
 
         btn_del = QToolButton()
@@ -351,35 +401,37 @@ class ActionRow(QWidget):
                 if idx >= 0:
                     c.setCurrentIndex(idx)
 
+    @staticmethod
+    def _refresh_field_combo(combo: QComboBox, columns: List[str]):
+        """Atualiza items e completer de um _field_combo preservando valor atual."""
+        cur = combo.currentText()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(columns)
+        combo.blockSignals(False)
+        comp = combo.completer()
+        if comp:
+            comp.setModel(QStringListModel(columns, comp))
+        idx = combo.findText(cur)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        elif combo.isEditable():
+            combo.setEditText(cur)
+
     def update_columns(self, columns: List[str]):
         """Atualiza todos os combos de campo desta linha quando a tabela muda."""
         self._columns = columns
-        cur = self.combo_field.currentText()
-        self.combo_field.clear()
-        self.combo_field.addItems(columns)
-        idx = self.combo_field.findText(cur)
-        if idx >= 0:
-            self.combo_field.setCurrentIndex(idx)
+        self._refresh_field_combo(self.combo_field, columns)
 
         # Atualiza combo de cópia de campo
         w_src = getattr(self, "w_source", None)
         if w_src is not None:
-            cur_src = w_src.currentText()
-            w_src.clear()
-            w_src.addItems(columns)
-            idx = w_src.findText(cur_src)
-            if idx >= 0:
-                w_src.setCurrentIndex(idx)
+            self._refresh_field_combo(w_src, columns)
 
         # Atualiza campo local no table_lookup
         w_lm = getattr(self, "w_local_match", None)
         if w_lm is not None:
-            cur_lm = w_lm.currentText()
-            w_lm.clear()
-            w_lm.addItems(columns)
-            idx = w_lm.findText(cur_lm)
-            if idx >= 0:
-                w_lm.setCurrentIndex(idx)
+            self._refresh_field_combo(w_lm, columns)
 
     def _current_type(self) -> str:
         idx = self.combo_type.currentIndex()
@@ -799,14 +851,9 @@ class RulesTab(QWidget):
 
     def _on_table_changed(self, table: str):
         self._columns = self.db.get_table_columns(table) if table else []
-        # Atualiza campos nas linhas de condição
+        # Atualiza campos nas linhas de condição (com completer)
         for cr in self._condition_rows:
-            cur = cr.combo_field.currentText()
-            cr.combo_field.clear()
-            cr.combo_field.addItems(self._columns)
-            idx = cr.combo_field.findText(cur)
-            if idx >= 0:
-                cr.combo_field.setCurrentIndex(idx)
+            cr.update_columns(self._columns)
         # Atualiza campos nas linhas de ação (incluindo combos aninhados)
         for ar in self._action_rows:
             ar.update_columns(self._columns)
@@ -995,16 +1042,48 @@ class RulesTab(QWidget):
             self._set_status(f"Pacote '{name}' criado.")
 
     def _add_rule_to_package(self):
-        if not self._current_rule_id:
-            self._set_status("Selecione uma regra avulsa primeiro.", error=True)
-            return
         pkgs = self.engine.packages
         if not pkgs:
-            self._set_status("Crie um pacote primeiro.", error=True)
+            self._set_status("Crie um pacote primeiro (botão '+ Pacote').", error=True)
             return
+
+        # Se um PACOTE está selecionado → pergunta qual regra adicionar a ELE
+        if self._current_pkg_id and not self._current_rule_id:
+            pkg = self.engine.get_package(self._current_pkg_id)
+            if not pkg:
+                return
+            # Lista de regras ainda não neste pacote
+            pkg_rule_ids = set(pkg.get("rule_ids", []))
+            avail = [r for r in self.engine.rules
+                     if r.get("id") not in pkg_rule_ids]
+            if not avail:
+                self._set_status("Todas as regras já estão neste pacote.", error=True)
+                return
+            rule_names = [r.get("name", "?") for r in avail]
+            rname, ok = QInputDialog.getItem(
+                self, "Adicionar Regra ao Pacote",
+                f"Qual regra adicionar ao pacote  '{pkg.get('name','?')}'?",
+                rule_names, 0, False)
+            if not ok:
+                return
+            rule = avail[rule_names.index(rname)]
+            pkg.get("rule_ids", []).append(rule.get("id"))
+            pkg["rule_ids"] = pkg.get("rule_ids", [])
+            self.engine.upsert_package(pkg)
+            self._refresh_rule_list()
+            self._set_status(
+                f"✔ Regra '{rule.get('name')}' adicionada ao pacote '{pkg.get('name')}'.")
+            return
+
+        # Se uma REGRA está selecionada → pergunta em qual pacote colocar
+        if not self._current_rule_id:
+            self._set_status(
+                "Selecione uma regra ou pacote na lista primeiro.", error=True)
+            return
+
         pkg_names = [p.get("name", "?") for p in pkgs]
-        name, ok = QInputDialog.getItem(self, "Adicionar ao Pacote",
-                                         "Escolha o pacote:", pkg_names, 0, False)
+        name, ok = QInputDialog.getItem(
+            self, "Adicionar ao Pacote", "Escolha o pacote:", pkg_names, 0, False)
         if not ok:
             return
         pkg = pkgs[pkg_names.index(name)]
@@ -1014,7 +1093,9 @@ class RulesTab(QWidget):
             pkg["rule_ids"] = rule_ids
             self.engine.upsert_package(pkg)
             self._refresh_rule_list()
-            self._set_status(f"Regra adicionada ao pacote '{name}'.")
+            self._set_status(f"✔ Regra adicionada ao pacote '{name}'.")
+        else:
+            self._set_status(f"Regra já está no pacote '{name}'.")
 
     def _save_rule(self):
         rule = self._collect_rule()

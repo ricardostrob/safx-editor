@@ -393,6 +393,9 @@ class RuleEngine:
         except Exception as exc:
             return 0, [f"Erro ao ler tabela: {exc}"]
 
+        # Coleta todos os updates antes de gravar (uma única transação)
+        pending: List[Tuple[str, List]] = []
+
         for row_tuple in rows:
             row = dict(zip(cols, row_tuple))
             row_id = row.get(ROW_ID_COL)
@@ -412,23 +415,33 @@ class RuleEngine:
                     new_val = self._apply_action(atype, action, field, row, errors, db)
                     if new_val is not None:
                         updates[field] = new_val
-                        row[field] = new_val  # cascata dentro da mesma regra
+                        row[field] = new_val  # cascata dentro da mesma linha
                 except Exception as exc:
                     errors.append(f"Ação [{atype}] campo '{field}': {exc}")
 
             if updates:
                 set_clause = ", ".join(f'"{k}" = ?' for k in updates)
                 vals = list(updates.values()) + [row_id]
+                pending.append((
+                    f'UPDATE "{table_name}" SET {set_clause} WHERE "{ROW_ID_COL}" = ?',
+                    vals
+                ))
+
+        # Grava em bloco dentro de uma única transação
+        if pending:
+            try:
+                with db._lock:
+                    db.conn.execute("BEGIN")
+                    for sql, vals in pending:
+                        db.conn.execute(sql, vals)
+                    db.conn.execute("COMMIT")
+                modified = len(pending)
+            except Exception as exc:
                 try:
-                    with db._lock:
-                        db.conn.execute(
-                            f'UPDATE "{table_name}" SET {set_clause} '
-                            f'WHERE "{ROW_ID_COL}" = ?',
-                            vals)
-                        db.conn.execute("COMMIT")
-                    modified += 1
-                except Exception as exc:
-                    errors.append(f"Erro ao salvar linha {row_id}: {exc}")
+                    db.conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                errors.append(f"Erro ao salvar alterações: {exc}")
 
         return modified, errors
 
