@@ -1,0 +1,49 @@
+{
+  "_comentario": "Arquivo de exemplo de configuração SAFX Editor — use Arquivo > Importar Configurações para carregar",
+  "general": {
+    "theme": "dark",
+    "font_size": 12,
+    "page_size": 1000,
+    "show_row_numbers": true,
+    "confirm_on_rollback": true,
+    "auto_limit_select": true,
+    "select_limit": 10000,
+    "layout_dir": ""
+  },
+  "export": {
+    "default_destination": "local",
+    "local_dir": "",
+    "encoding": "latin-1",
+    "line_ending": "CRLF",
+    "open_after_export": false
+  },
+  "sftp_profiles": [
+    {
+      "name": "MasterSAF Produção",
+      "enabled": true,
+      "host": "sftp.exemplo.com.br",
+      "port": 22,
+      "username": "usuario",
+      "password": "",
+      "key_path": "",
+      "remote_path": "/homolog/upload/",
+      "timeout": 30
+    }
+  ],
+  "db_profiles": [
+    {
+      "name": "Banco ERP Principal",
+      "type": "PostgreSQL",
+      "host": "192.168.1.100",
+      "port": 5432,
+      "database": "erp_prod",
+      "username": "user_safx",
+      "password": "",
+      "schema": "public"
+    }
+  ],
+  "ui": {
+    "theme": "dark",
+    "sidebar_width": 220
+  }
+}

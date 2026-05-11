@@ -160,7 +160,20 @@ class TabGeral(QWidget):
         g3 = _group("Diretório de Layouts (MANUAL LAYOUT)")
         form3 = QFormLayout(g3)
         self.layout_dir = _line_edit("Caminho para os arquivos .md de layout")
-        self.layout_dir.setText(s.get("layout_dir", ""))
+        _saved_dir = s.get("layout_dir", "")
+        if not _saved_dir:
+            # Auto-detecta o diretório interno de layouts
+            import sys
+            from pathlib import Path
+            _this = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))
+            for _cand in [
+                _this / "resources" / "estrutura_md",
+                Path(__file__).resolve().parent.parent / "resources" / "estrutura_md",
+            ]:
+                if _cand.exists() and any(_cand.glob("*.md")):
+                    _saved_dir = str(_cand)
+                    break
+        self.layout_dir.setText(_saved_dir)
         btn_browse = _btn("Procurar...", width=90)
         btn_browse.clicked.connect(self._browse_layout)
         row_ld = QHBoxLayout()

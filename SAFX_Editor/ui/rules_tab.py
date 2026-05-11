@@ -544,20 +544,23 @@ class RulesTab(QWidget):
         self.setStyleSheet(f"background:{_DARK};color:{_TEXT};")
 
         # Barra de ferramentas superior
-        root.addWidget(self._build_toolbar())
+        self._toolbar_bar = self._build_toolbar()
+        root.addWidget(self._toolbar_bar)
         root.addWidget(_sep())
 
         # Divisão esquerda (lista) / direita (editor)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(4)
-        splitter.setStyleSheet(
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(4)
+        self._splitter.setStyleSheet(
             f"QSplitter::handle{{background:{_BORDER};}}")
 
-        splitter.addWidget(self._build_left_panel())
-        splitter.addWidget(self._build_right_panel())
-        splitter.setSizes([220, 700])
+        self._left_panel = self._build_left_panel()
+        self._right_scroll = self._build_right_panel()
+        self._splitter.addWidget(self._left_panel)
+        self._splitter.addWidget(self._right_scroll)
+        self._splitter.setSizes([220, 700])
 
-        root.addWidget(splitter, 1)
+        root.addWidget(self._splitter, 1)
 
         # Barra de status
         self._lbl_status = QLabel("")
@@ -608,6 +611,7 @@ class RulesTab(QWidget):
         left.setMinimumWidth(190)
         left.setMaximumWidth(260)
         left.setStyleSheet(f"background:{_SURFACE};border-right:1px solid {_BORDER};")
+        self._left_panel_ref = left
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.setSpacing(0)
@@ -615,9 +619,11 @@ class RulesTab(QWidget):
         # Cabeçalho
         hdr = QWidget()
         hdr.setStyleSheet(f"background:{_OVERLAY};border-bottom:1px solid {_BORDER};")
+        self._left_hdr = hdr
         hdr_lay = QHBoxLayout(hdr)
         hdr_lay.setContentsMargins(8, 6, 8, 6)
-        hdr_lay.addWidget(_lbl("📋  Regras & Pacotes", _ACCENT, True))
+        self._lbl_rules_hdr = _lbl("📋  Regras & Pacotes", _ACCENT, True)
+        hdr_lay.addWidget(self._lbl_rules_hdr)
         ll.addWidget(hdr)
 
         # Lista
@@ -632,6 +638,7 @@ class RulesTab(QWidget):
         # Botões
         btn_area = QWidget()
         btn_area.setStyleSheet(f"background:{_OVERLAY};border-top:1px solid {_BORDER};")
+        self._left_btn_area = btn_area
         blay = QVBoxLayout(btn_area)
         blay.setContentsMargins(8, 6, 8, 6)
         blay.setSpacing(4)
@@ -810,6 +817,79 @@ class RulesTab(QWidget):
 
         scroll.setWidget(right)
         return scroll
+
+    # ── Tema ──────────────────────────────────────────────────────────────────
+
+    def apply_theme(self, theme: str = 'dark'):
+        """Propaga tema claro/escuro para todos os containers da aba de Regras."""
+        if theme == 'light':
+            bg      = '#f0f2f5'
+            surface = '#e8eaf0'
+            overlay = '#dde1ea'
+            border  = '#b8bcd0'
+            text    = '#1a1a2e'
+            muted   = '#5a6070'
+            accent  = '#1a5ab4'
+            # QSS abrangente para todos os filhos (sem sobrescrever cores funcionais dos btns)
+            base_qss = (
+                f"QWidget{{background:{bg};color:{text};}}"
+                f"QLabel{{color:{text};background:transparent;}}"
+                f"QLineEdit{{background:white;color:{text};border:1px solid {border};"
+                f"border-radius:4px;padding:0 6px;}}"
+                f"QComboBox{{background:white;color:{text};border:1px solid {border};"
+                f"border-radius:4px;padding:0 6px;font-size:12px;}}"
+                f"QComboBox QAbstractItemView{{background:white;color:{text};"
+                f"selection-background-color:{accent};selection-color:white;}}"
+                f"QListWidget{{background:{surface};color:{text};"
+                f"border:none;font-size:12px;}}"
+                f"QListWidget::item{{padding:6px 10px;border-bottom:1px solid {border};}}"
+                f"QListWidget::item:selected{{background:{accent};color:white;"
+                f"font-weight:700;}}"
+                f"QGroupBox{{color:{text};border:1px solid {border};border-radius:6px;"
+                f"margin-top:8px;padding:8px;}}"
+                f"QGroupBox::title{{color:{accent};padding:0 4px;background:{bg};}}"
+                f"QScrollArea{{background:{bg};border:none;}}"
+                f"QSplitter::handle{{background:{border};}}"
+            )
+            self.setStyleSheet(base_qss)
+            self._toolbar_bar.setStyleSheet(
+                f"background:{surface};border-bottom:1px solid {border};")
+            self._left_panel_ref.setStyleSheet(
+                f"background:{surface};border-right:1px solid {border};")
+            self._left_hdr.setStyleSheet(
+                f"background:{overlay};border-bottom:1px solid {border};")
+            self._lbl_rules_hdr.setStyleSheet(
+                f"color:{accent};font-size:12px;font-weight:700;")
+            self._rule_list.setStyleSheet(
+                f"QListWidget{{background:{surface};border:none;color:{text};font-size:12px;}}"
+                f"QListWidget::item{{padding:6px 10px;border-bottom:1px solid {border};}}"
+                f"QListWidget::item:selected{{background:{accent};color:white;font-weight:700;}}")
+            self._left_btn_area.setStyleSheet(
+                f"background:{overlay};border-top:1px solid {border};")
+            self._lbl_status.setStyleSheet(
+                f"background:{surface};color:{muted};font-size:11px;padding:4px 12px;")
+            self._splitter.setStyleSheet(
+                f"QSplitter::handle{{background:{border};}}")
+        else:
+            self.setStyleSheet(f"background:{_DARK};color:{_TEXT};")
+            self._toolbar_bar.setStyleSheet(
+                f"background:{_SURFACE};border-bottom:1px solid {_BORDER};")
+            self._left_panel_ref.setStyleSheet(
+                f"background:{_SURFACE};border-right:1px solid {_BORDER};")
+            self._left_hdr.setStyleSheet(
+                f"background:{_OVERLAY};border-bottom:1px solid {_BORDER};")
+            self._lbl_rules_hdr.setStyleSheet(
+                f"color:{_ACCENT};font-size:12px;font-weight:700;")
+            self._rule_list.setStyleSheet(
+                f"QListWidget{{background:{_SURFACE};border:none;color:{_TEXT};font-size:12px;}}"
+                f"QListWidget::item{{padding:6px 10px;border-bottom:1px solid {_BORDER};}}"
+                f"QListWidget::item:selected{{background:{_ACCENT};color:{_DARK};font-weight:700;}}")
+            self._left_btn_area.setStyleSheet(
+                f"background:{_OVERLAY};border-top:1px solid {_BORDER};")
+            self._lbl_status.setStyleSheet(
+                f"background:{_SURFACE};color:{_MUTED};font-size:11px;padding:4px 12px;")
+            self._splitter.setStyleSheet(
+                f"QSplitter::handle{{background:{_BORDER};}}")
 
     # ── Atualização da lista de tabelas ───────────────────────────────────────
 

@@ -311,14 +311,19 @@ class MainWindow(QMainWindow):
         # Botões: Importar + Configurações
         import_widget = QWidget()
         import_widget.setStyleSheet("background:#181825; padding:8px;")
+        self._import_widget = import_widget
         import_widget.setFixedHeight(52)
         import_layout = QHBoxLayout(import_widget)
         import_layout.setContentsMargins(8, 4, 8, 4)
         import_layout.setSpacing(6)
 
         self.btn_import = QPushButton("+ Importar SAFX")
-        self.btn_import.setProperty("class", "primary")
         self.btn_import.setFixedHeight(34)
+        self.btn_import.setStyleSheet(
+            "QPushButton{background:#e8630a;color:white;border:none;"
+            "border-radius:6px;font-size:13px;font-weight:700;padding:0 10px;}"
+            "QPushButton:hover{background:#f97316;}"
+            "QPushButton:pressed{background:#c2530a;}")
         self.btn_import.clicked.connect(self.import_safx)
         import_layout.addWidget(self.btn_import)
 
@@ -391,9 +396,13 @@ class MainWindow(QMainWindow):
         self.btn_config_keys.clicked.connect(self._configure_key_fields)
         th_layout.addWidget(self.btn_config_keys)
 
-        # Botão exportar
+        # Botão exportar (laranja)
         self.btn_export = QPushButton("📤 Exportar")
-        self.btn_export.setProperty("class", "primary")
+        self.btn_export.setStyleSheet(
+            "QPushButton{background:#e8630a;color:white;border:none;"
+            "border-radius:6px;font-size:13px;font-weight:700;padding:4px 14px;}"
+            "QPushButton:hover{background:#f97316;}"
+            "QPushButton:pressed{background:#c2530a;}")
         self.btn_export.setVisible(False)
         self.btn_export.clicked.connect(self._export_data)
         th_layout.addWidget(self.btn_export)
@@ -498,6 +507,18 @@ class MainWindow(QMainWindow):
         act_settings.setShortcut(QKeySequence("Ctrl+,"))
         act_settings.triggered.connect(self._open_settings)
         menu_file.addAction(act_settings)
+
+        menu_file.addSeparator()
+
+        act_export_cfg = QAction("📤  Exportar Configurações...", self)
+        act_export_cfg.setToolTip("Salva todas as configurações em um arquivo JSON")
+        act_export_cfg.triggered.connect(self._export_config)
+        menu_file.addAction(act_export_cfg)
+
+        act_import_cfg = QAction("📥  Importar Configurações...", self)
+        act_import_cfg.setToolTip("Carrega configurações a partir de um arquivo JSON")
+        act_import_cfg.triggered.connect(self._import_config)
+        menu_file.addAction(act_import_cfg)
 
         menu_file.addSeparator()
 
@@ -641,6 +662,16 @@ class MainWindow(QMainWindow):
         # Propaga para painéis com inline styles tema-dependentes
         if hasattr(self, 'data_panel'):
             self.data_panel.apply_theme(theme)
+        if hasattr(self, 'rules_tab'):
+            self.rules_tab.apply_theme(theme)
+        # Sidebar: área de importar
+        if hasattr(self, '_import_widget'):
+            if theme == 'light':
+                self._import_widget.setStyleSheet(
+                    "background:#dde1ea; padding:8px;")
+            else:
+                self._import_widget.setStyleSheet(
+                    "background:#181825; padding:8px;")
 
     def _update_ui_state(self):
         has_table = self._current_table is not None
@@ -994,6 +1025,48 @@ class MainWindow(QMainWindow):
             self._update_layout_dir_label()
             self.status_bar.showMessage(
                 f"Diretório de layouts atualizado: {folder}", 4000)
+
+    # ─── Importar / Exportar Configurações ───────────────────────────────────
+
+    def _export_config(self):
+        """Exporta todas as configurações para um arquivo JSON."""
+        import json
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar Configurações SAFX",
+            "safx_config.json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            data = self.cfg.export_all()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self.status_bar.showMessage(f"✔ Configurações exportadas: {path}", 5000)
+        except Exception as exc:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Erro ao exportar", str(exc))
+
+    def _import_config(self):
+        """Importa configurações a partir de um arquivo JSON."""
+        import json
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Importar Configurações SAFX",
+            "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.cfg.import_all(data)
+            self._apply_style()
+            self.status_bar.showMessage(f"✔ Configurações importadas de: {path}", 5000)
+            QMessageBox.information(
+                self, "Configurações importadas",
+                "As configurações foram aplicadas.\n"
+                "Reinicie o aplicativo para garantir que todas as mudanças sejam aplicadas.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Erro ao importar", str(exc))
 
     # ─── Eventos ──────────────────────────────────────────────────────────────
 

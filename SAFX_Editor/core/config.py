@@ -192,6 +192,18 @@ class AppConfig:
         self._data = self._deep_merge({}, DEFAULTS)
         self._save()
 
+    # ─── Importar / Exportar configurações ───────────────────────────────────
+
+    def export_all(self) -> Dict[str, Any]:
+        """Retorna cópia de todos os dados de configuração para serialização JSON."""
+        import copy
+        return copy.deepcopy(self._data)
+
+    def import_all(self, data: Dict[str, Any]):
+        """Substitui configurações pelos dados importados (merge com defaults)."""
+        self._data = self._deep_merge(DEFAULTS, data)
+        self._save()
+
     # ─── Atalhos comuns ───────────────────────────────────────────────────────
 
     # ─── Perfis SFTP (múltiplos) ──────────────────────────────────────────────
