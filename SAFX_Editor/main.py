@@ -30,19 +30,6 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR.parent))
 
 
-def _load_branding_icon():
-    """Ícone do app (PNG ou ICNS em resources/)."""
-    try:
-        from PyQt6.QtGui import QIcon
-    except ImportError:
-        return None
-    for name in ("app_icon.png", "app_icon.icns"):
-        p = _THIS_DIR / "resources" / name
-        if p.is_file():
-            return QIcon(str(p))
-    return None
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="SAFX Editor — MasterSAF Data Adjuster")
@@ -58,24 +45,24 @@ def main():
     # Se não especificado, tenta encontrar automaticamente
     if not layout_dir:
         candidates = [
-            _THIS_DIR / "resources" / "estrutura_md",   # layouts empacotados com o app
-            _THIS_DIR.parent / "ESTRUTURA" / "estrutura_md",
+            # Localização padrão dentro do pacote (source e PyInstaller)
+            _THIS_DIR / "resources" / "estrutura_md",
+            # PyInstaller: _MEIPASS/_internal
+            Path(getattr(sys, '_MEIPASS', _THIS_DIR)) / "resources" / "estrutura_md",
+            # Legado: pasta "MANUAL LAYOUT"
             _THIS_DIR.parent / "MANUAL LAYOUT",
             _THIS_DIR / "MANUAL LAYOUT",
             Path.cwd() / "MANUAL LAYOUT",
-            Path.cwd() / "ESTRUTURA" / "estrutura_md",
         ]
         for candidate in candidates:
-            if candidate.exists() and candidate.is_dir():
-                # Exige pelo menos um SAFX*.md para considerar válido
-                if any(candidate.glob("SAFX*.md")):
-                    layout_dir = str(candidate)
-                    logger.info(f"Diretório de layouts SAFX: {layout_dir}")
-                    break
+            if candidate.exists():
+                layout_dir = str(candidate)
+                logger.info(f"Layouts encontrados: {layout_dir}")
+                break
         else:
             logger.warning(
-                "Diretório MANUAL LAYOUT não encontrado automaticamente. "
-                "Configure manualmente em Arquivo > Configurar Diretório de Layouts.")
+                "Diretório de layouts não encontrado. "
+                "Configure em: Configurações > Geral > Diretório de Layouts.")
 
     try:
         from PyQt6.QtWidgets import QApplication
@@ -91,10 +78,6 @@ def main():
     app.setOrganizationName("LANXESS Brasil")
     app.setApplicationVersion("1.0.0")
 
-    _icon = _load_branding_icon()
-    if _icon:
-        app.setWindowIcon(_icon)
-
     # Fonte padrão
     font = QFont("Segoe UI", 10)
     app.setFont(font)
@@ -107,8 +90,6 @@ def main():
 
     from ui.main_window import MainWindow
     window = MainWindow(layout_dir=layout_dir)
-    if _icon:
-        window.setWindowIcon(_icon)
     window.show()
 
     logger.info("SAFX Editor iniciado")
