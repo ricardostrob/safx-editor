@@ -1,0 +1,1135 @@
+"""
+Aba de Regras SAFX — interface visual para criar e executar regras de transformação.
+
+Layout:
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ [Tabela ▼]  ▶ Executar Regra  ▶ Executar Pacote  [status]            │
+  ├──────────────────┬─────────────────────────────────────────────────────┤
+  │ 📦 Pacotes       │ Nome: [___________]  Tipo: [___▼]   [✓ Habilitar] │
+  │   ▼ Pacote 1    │                                                     │
+  │     ● Regra A   │ ─ CONDIÇÕES ─────────────────────────────────────  │
+  │     ● Regra B   │   Lógica: (● AND  ○ OR)                            │
+  │ 📋 Avulsas       │   [Campo▼] [Operador▼] [Valor___________] [🗑]    │
+  │   ● Regra C     │   + Adicionar Condição                             │
+  │                  │                                                     │
+  │ [+Regra][+Pacote]│ ─ AÇÕES ──────────────────────────────────────── │
+  │ [🗑 Remover]     │   [Tipo▼] [Campo▼] [Valor/Fórmula___________] [🗑]│
+  │                  │   + Adicionar Ação                                 │
+  │                  │                                                     │
+  │                  │ [▶ Testar Prévia]  [💾 Salvar]  [🗑 Excluir]      │
+  └──────────────────┴─────────────────────────────────────────────────────┘
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Any, Dict, List, Optional
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame,
+    QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QPushButton,
+    QRadioButton, QScrollArea, QSizePolicy, QSplitter,
+    QTextEdit, QToolButton, QVBoxLayout, QWidget,
+)
+
+from core.rule_engine import (
+    ACTION_TYPES, CONDITION_OPS, FORMAT_TYPES, RuleEngine,
+    eval_formula,
+)
+
+logger = logging.getLogger(__name__)
+
+# ── Paleta ─────────────────────────────────────────────────────────────────────
+_DARK = "#1e1e2e"
+_SURFACE = "#181825"
+_OVERLAY = "#313244"
+_BORDER = "#45475a"
+_TEXT = "#cdd6f4"
+_MUTED = "#6c7086"
+_ACCENT = "#89b4fa"
+_GREEN = "#a6e3a1"
+_RED = "#f38ba8"
+_YELLOW = "#f9e2af"
+_PEACH = "#fab387"
+
+_BTN_BASE = (
+    "QPushButton{border-radius:5px;font-size:12px;font-weight:600;padding:4px 12px;}"
+    "QPushButton:hover{filter:brightness(1.15);}"
+    "QPushButton:disabled{opacity:0.4;}"
+)
+
+
+def _btn(text: str, color: str = _ACCENT, bg: str = _DARK, width: int = 0) -> QPushButton:
+    b = QPushButton(text)
+    b.setStyleSheet(
+        _BTN_BASE +
+        f"QPushButton{{color:{color};background:{bg};"
+        f"border:1px solid {color};}}")
+    if width:
+        b.setFixedWidth(width)
+    b.setFixedHeight(30)
+    return b
+
+
+def _combo(items: Optional[List[str]] = None) -> QComboBox:
+    c = QComboBox()
+    c.setFixedHeight(28)
+    c.setStyleSheet(
+        f"QComboBox{{background:{_OVERLAY};color:{_TEXT};border:1px solid {_BORDER};"
+        f"border-radius:4px;padding:0 6px;font-size:12px;}}"
+        f"QComboBox::drop-down{{border:none;}}"
+        f"QComboBox QAbstractItemView{{background:{_SURFACE};color:{_TEXT};"
+        f"selection-background-color:{_ACCENT};selection-color:{_DARK};}}")
+    if items:
+        c.addItems(items)
+    return c
+
+
+def _line(placeholder: str = "") -> QLineEdit:
+    e = QLineEdit()
+    e.setPlaceholderText(placeholder)
+    e.setFixedHeight(28)
+    e.setStyleSheet(
+        f"QLineEdit{{background:{_OVERLAY};color:{_TEXT};border:1px solid {_BORDER};"
+        f"border-radius:4px;padding:0 6px;font-size:12px;}}")
+    return e
+
+
+def _lbl(text: str, color: str = _MUTED, bold: bool = False) -> QLabel:
+    l = QLabel(text)
+    w = "700" if bold else "400"
+    l.setStyleSheet(f"color:{color};font-size:12px;font-weight:{w};")
+    return l
+
+
+def _sep() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setStyleSheet(f"color:{_BORDER};background:{_BORDER};")
+    f.setFixedHeight(1)
+    return f
+
+
+# ─── Widget de uma condição ────────────────────────────────────────────────────
+
+class ConditionRow(QWidget):
+    removed = pyqtSignal(object)
+
+    def __init__(self, columns: List[str], parent=None):
+        super().__init__(parent)
+        self._columns = columns
+        self._build()
+
+    def _build(self):
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 2)
+        lay.setSpacing(4)
+
+        self.combo_field = _combo(self._columns)
+        self.combo_field.setMinimumWidth(120)
+        lay.addWidget(self.combo_field)
+
+        self.combo_op = _combo(list(CONDITION_OPS.values()))
+        self.combo_op.setMinimumWidth(160)
+        self.combo_op.currentIndexChanged.connect(self._on_op_changed)
+        lay.addWidget(self.combo_op)
+
+        self.edit_value = _line("valor ou {CAMPO}")
+        self.edit_value.setMinimumWidth(140)
+        lay.addWidget(self.edit_value, 1)
+
+        btn_del = QToolButton()
+        btn_del.setText("✕")
+        btn_del.setFixedSize(26, 26)
+        btn_del.setStyleSheet(
+            f"QToolButton{{color:{_RED};background:{_DARK};"
+            f"border:1px solid {_RED};border-radius:4px;font-weight:700;}}"
+            f"QToolButton:hover{{background:#3a1a1a;}}")
+        btn_del.clicked.connect(lambda: self.removed.emit(self))
+        lay.addWidget(btn_del)
+
+    def _on_op_changed(self, idx: int):
+        key = list(CONDITION_OPS.keys())[idx]
+        self.edit_value.setEnabled(key not in ("is_empty", "is_not_empty"))
+
+    def to_dict(self) -> Dict:
+        op_key = list(CONDITION_OPS.keys())[self.combo_op.currentIndex()]
+        return {
+            "field": self.combo_field.currentText(),
+            "op": op_key,
+            "value": self.edit_value.text(),
+        }
+
+    def load_dict(self, d: Dict):
+        col = d.get("field", "")
+        idx = self.combo_field.findText(col)
+        if idx >= 0:
+            self.combo_field.setCurrentIndex(idx)
+
+        op = d.get("op", "equals")
+        op_keys = list(CONDITION_OPS.keys())
+        if op in op_keys:
+            self.combo_op.setCurrentIndex(op_keys.index(op))
+
+        self.edit_value.setText(d.get("value", ""))
+
+
+# ─── Widget de uma ação ───────────────────────────────────────────────────────
+
+class ActionRow(QWidget):
+    removed = pyqtSignal(object)
+
+    def __init__(self, columns: List[str], parent=None):
+        super().__init__(parent)
+        self._columns = columns
+        self._build()
+
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 2, 0, 2)
+        outer.setSpacing(2)
+
+        # Linha principal: tipo, campo, botão excluir
+        row1 = QHBoxLayout()
+        row1.setSpacing(4)
+
+        self.combo_type = _combo(list(ACTION_TYPES.values()))
+        self.combo_type.setMinimumWidth(200)
+        self.combo_type.currentIndexChanged.connect(self._on_type_changed)
+        row1.addWidget(self.combo_type)
+
+        row1.addWidget(_lbl("→ campo:"))
+
+        self.combo_field = _combo(self._columns)
+        self.combo_field.setMinimumWidth(120)
+        row1.addWidget(self.combo_field)
+
+        btn_del = QToolButton()
+        btn_del.setText("✕")
+        btn_del.setFixedSize(26, 26)
+        btn_del.setStyleSheet(
+            f"QToolButton{{color:{_RED};background:{_DARK};"
+            f"border:1px solid {_RED};border-radius:4px;font-weight:700;}}"
+            f"QToolButton:hover{{background:#3a1a1a;}}")
+        btn_del.clicked.connect(lambda: self.removed.emit(self))
+        row1.addWidget(btn_del)
+        row1.addStretch()
+        outer.addLayout(row1)
+
+        # Linha de valor/fórmula (dinâmica por tipo)
+        self._extra_widget = QWidget()
+        self._extra_lay = QHBoxLayout(self._extra_widget)
+        self._extra_lay.setContentsMargins(4, 0, 0, 0)
+        self._extra_lay.setSpacing(4)
+        outer.addWidget(self._extra_widget)
+
+        self._build_value_widget()
+
+    def _clear_extra(self):
+        while self._extra_lay.count():
+            item = self._extra_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _on_type_changed(self, _idx: int):
+        self._build_value_widget()
+
+    def _build_value_widget(self):
+        self._clear_extra()
+        atype = self._current_type()
+
+        if atype == "set_value":
+            self._extra_lay.addWidget(_lbl("Valor:"))
+            self.w_value = _line("texto ou número")
+            self._extra_lay.addWidget(self.w_value, 1)
+
+        elif atype in ("set_formula", "concat"):
+            self._extra_lay.addWidget(_lbl("Fórmula:"))
+            self.w_formula = _line("{CAMPO1} * {CAMPO2}  ou  {NOME} + ' ' + {SOBRENOME}")
+            self._extra_lay.addWidget(self.w_formula, 1)
+            tip = _lbl("  Use {CAMPO} para referenciar campos", _MUTED)
+            self._extra_lay.addWidget(tip)
+
+        elif atype == "copy_field":
+            self._extra_lay.addWidget(_lbl("De:"))
+            self.w_source = _combo(self._columns)
+            self._extra_lay.addWidget(self.w_source)
+
+        elif atype == "format":
+            self._extra_lay.addWidget(_lbl("Formato:"))
+            self.w_fmt = _combo(list(FORMAT_TYPES.values()))
+            self.w_fmt.setMinimumWidth(200)
+            self._extra_lay.addWidget(self.w_fmt)
+            self._extra_lay.addWidget(_lbl("  Arg:"))
+            self.w_fmt_arg = _line("ex: 10  ou  antigo|novo")
+            self.w_fmt_arg.setFixedWidth(120)
+            self._extra_lay.addWidget(self.w_fmt_arg)
+
+        elif atype == "lookup":
+            self._extra_lay.addWidget(_lbl("Mapeamento:"))
+            self.w_mapping = _line("A=Aprovado; R=Reprovado; P=Pendente")
+            self._extra_lay.addWidget(self.w_mapping, 1)
+
+        elif atype == "conditional":
+            self._extra_lay.addWidget(_lbl("Se:"))
+            self.w_cond_formula = _line("{VALOR} > 0")
+            self.w_cond_formula.setFixedWidth(150)
+            self._extra_lay.addWidget(self.w_cond_formula)
+            self._extra_lay.addWidget(_lbl("então:"))
+            self.w_then = _line("SIM")
+            self.w_then.setFixedWidth(80)
+            self._extra_lay.addWidget(self.w_then)
+            self._extra_lay.addWidget(_lbl("senão:"))
+            self.w_else = _line("NÃO")
+            self.w_else.setFixedWidth(80)
+            self._extra_lay.addWidget(self.w_else)
+
+        elif atype == "api_fetch":
+            self._extra_lay.addWidget(_lbl("URL:"))
+            self.w_url = _line("https://api.exemplo.com/dados/{CODIGO}")
+            self._extra_lay.addWidget(self.w_url, 1)
+            self._extra_lay.addWidget(_lbl("Campo resp.:"))
+            self.w_resp = _line("data.valor")
+            self.w_resp.setFixedWidth(120)
+            self._extra_lay.addWidget(self.w_resp)
+
+        self._extra_lay.addStretch()
+
+    def _current_type(self) -> str:
+        idx = self.combo_type.currentIndex()
+        return list(ACTION_TYPES.keys())[idx]
+
+    def to_dict(self) -> Dict:
+        atype = self._current_type()
+        d: Dict[str, Any] = {
+            "type": atype,
+            "field": self.combo_field.currentText(),
+        }
+        if atype == "set_value":
+            d["value"] = getattr(self, "w_value", _line()).text()
+        elif atype in ("set_formula", "concat"):
+            d["formula"] = getattr(self, "w_formula", _line()).text()
+        elif atype == "copy_field":
+            d["source_field"] = getattr(self, "w_source", _combo()).currentText()
+        elif atype == "format":
+            fmt_keys = list(FORMAT_TYPES.keys())
+            fidx = getattr(self, "w_fmt", _combo()).currentIndex()
+            d["format_type"] = fmt_keys[fidx] if 0 <= fidx < len(fmt_keys) else "uppercase"
+            d["format_arg"] = getattr(self, "w_fmt_arg", _line()).text()
+        elif atype == "lookup":
+            d["mapping_raw"] = getattr(self, "w_mapping", _line()).text()
+        elif atype == "conditional":
+            d["formula"] = getattr(self, "w_cond_formula", _line()).text()
+            d["then_value"] = getattr(self, "w_then", _line()).text()
+            d["else_value"] = getattr(self, "w_else", _line()).text()
+        elif atype == "api_fetch":
+            d["url"] = getattr(self, "w_url", _line()).text()
+            d["response_field"] = getattr(self, "w_resp", _line()).text()
+        return d
+
+    def load_dict(self, d: Dict):
+        atype = d.get("type", "set_value")
+        keys = list(ACTION_TYPES.keys())
+        if atype in keys:
+            self.combo_type.setCurrentIndex(keys.index(atype))
+            self._build_value_widget()
+
+        col = d.get("field", "")
+        idx = self.combo_field.findText(col)
+        if idx >= 0:
+            self.combo_field.setCurrentIndex(idx)
+
+        if atype == "set_value":
+            getattr(self, "w_value", _line()).setText(d.get("value", ""))
+        elif atype in ("set_formula", "concat"):
+            getattr(self, "w_formula", _line()).setText(d.get("formula", ""))
+        elif atype == "copy_field":
+            src = d.get("source_field", "")
+            w = getattr(self, "w_source", None)
+            if w:
+                i = w.findText(src)
+                if i >= 0:
+                    w.setCurrentIndex(i)
+        elif atype == "format":
+            fmt_keys = list(FORMAT_TYPES.keys())
+            ft = d.get("format_type", "uppercase")
+            if ft in fmt_keys:
+                getattr(self, "w_fmt", _combo()).setCurrentIndex(fmt_keys.index(ft))
+            getattr(self, "w_fmt_arg", _line()).setText(d.get("format_arg", ""))
+        elif atype == "lookup":
+            getattr(self, "w_mapping", _line()).setText(d.get("mapping_raw", ""))
+        elif atype == "conditional":
+            getattr(self, "w_cond_formula", _line()).setText(d.get("formula", ""))
+            getattr(self, "w_then", _line()).setText(d.get("then_value", ""))
+            getattr(self, "w_else", _line()).setText(d.get("else_value", ""))
+        elif atype == "api_fetch":
+            getattr(self, "w_url", _line()).setText(d.get("url", ""))
+            getattr(self, "w_resp", _line()).setText(d.get("response_field", ""))
+
+
+# ─── Aba principal de Regras ──────────────────────────────────────────────────
+
+class RulesTab(QWidget):
+    """Aba de regras de transformação de dados."""
+
+    # Emitido quando uma regra modifica dados — para recarregar a grade
+    dataChanged = pyqtSignal()
+
+    def __init__(self, db, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.engine = RuleEngine()
+        self._current_rule_id: Optional[str] = None
+        self._current_pkg_id: Optional[str] = None
+        self._columns: List[str] = []
+        self._condition_rows: List[ConditionRow] = []
+        self._action_rows: List[ActionRow] = []
+        self._build()
+
+    # ── Construção da UI ──────────────────────────────────────────────────────
+
+    def _build(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.setStyleSheet(f"background:{_DARK};color:{_TEXT};")
+
+        # Barra de ferramentas superior
+        root.addWidget(self._build_toolbar())
+        root.addWidget(_sep())
+
+        # Divisão esquerda (lista) / direita (editor)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+        splitter.setStyleSheet(
+            f"QSplitter::handle{{background:{_BORDER};}}")
+
+        splitter.addWidget(self._build_left_panel())
+        splitter.addWidget(self._build_right_panel())
+        splitter.setSizes([220, 700])
+
+        root.addWidget(splitter, 1)
+
+        # Barra de status
+        self._lbl_status = QLabel("")
+        self._lbl_status.setStyleSheet(
+            f"background:{_SURFACE};color:{_MUTED};font-size:11px;padding:4px 12px;")
+        self._lbl_status.setFixedHeight(24)
+        root.addWidget(self._lbl_status)
+
+    def _build_toolbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(44)
+        bar.setStyleSheet(f"background:{_SURFACE};border-bottom:1px solid {_BORDER};")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setSpacing(8)
+
+        lay.addWidget(_lbl("Tabela:", _MUTED))
+        self._combo_table = _combo()
+        self._combo_table.setMinimumWidth(180)
+        self._combo_table.currentTextChanged.connect(self._on_table_changed)
+        lay.addWidget(self._combo_table)
+
+        lay.addWidget(_sep_v())
+
+        self._btn_exec_rule = _btn("▶  Executar Regra", _GREEN, "#1a3a1a", 160)
+        self._btn_exec_rule.clicked.connect(self._exec_current_rule)
+        lay.addWidget(self._btn_exec_rule)
+
+        self._btn_exec_pkg = _btn("▶▶  Executar Pacote", _PEACH, "#2a1a0a", 170)
+        self._btn_exec_pkg.clicked.connect(self._exec_current_pkg)
+        lay.addWidget(self._btn_exec_pkg)
+
+        lay.addWidget(_sep_v())
+
+        self._lbl_toolbar = QLabel("")
+        self._lbl_toolbar.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        lay.addWidget(self._lbl_toolbar)
+        lay.addStretch()
+
+        btn_ref = _btn("⟳ Atualizar", _MUTED, _DARK, 110)
+        btn_ref.clicked.connect(self.refresh_tables)
+        lay.addWidget(btn_ref)
+
+        return bar
+
+    def _build_left_panel(self) -> QWidget:
+        left = QWidget()
+        left.setMinimumWidth(190)
+        left.setMaximumWidth(260)
+        left.setStyleSheet(f"background:{_SURFACE};border-right:1px solid {_BORDER};")
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(0)
+
+        # Cabeçalho
+        hdr = QWidget()
+        hdr.setStyleSheet(f"background:{_OVERLAY};border-bottom:1px solid {_BORDER};")
+        hdr_lay = QHBoxLayout(hdr)
+        hdr_lay.setContentsMargins(8, 6, 8, 6)
+        hdr_lay.addWidget(_lbl("📋  Regras & Pacotes", _ACCENT, True))
+        ll.addWidget(hdr)
+
+        # Lista
+        self._rule_list = QListWidget()
+        self._rule_list.setStyleSheet(
+            f"QListWidget{{background:{_SURFACE};border:none;color:{_TEXT};font-size:12px;}}"
+            f"QListWidget::item{{padding:6px 10px;border-bottom:1px solid {_BORDER};}}"
+            f"QListWidget::item:selected{{background:{_ACCENT};color:{_DARK};font-weight:700;}}")
+        self._rule_list.currentItemChanged.connect(self._on_list_item_changed)
+        ll.addWidget(self._rule_list, 1)
+
+        # Botões
+        btn_area = QWidget()
+        btn_area.setStyleSheet(f"background:{_OVERLAY};border-top:1px solid {_BORDER};")
+        blay = QVBoxLayout(btn_area)
+        blay.setContentsMargins(8, 6, 8, 6)
+        blay.setSpacing(4)
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(4)
+        btn_add_rule = _btn("+ Regra", _GREEN, "#1a3a1a")
+        btn_add_rule.clicked.connect(self._new_rule)
+        row1.addWidget(btn_add_rule)
+        btn_add_pkg = _btn("+ Pacote", _ACCENT, "#0a1a3a")
+        btn_add_pkg.clicked.connect(self._new_package)
+        row1.addWidget(btn_add_pkg)
+        blay.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(4)
+        btn_add_to_pkg = _btn("↳ Adicionar ao Pacote", _YELLOW, "#2a1a00")
+        btn_add_to_pkg.setFixedHeight(28)
+        btn_add_to_pkg.clicked.connect(self._add_rule_to_package)
+        row2.addWidget(btn_add_to_pkg)
+        blay.addLayout(row2)
+
+        btn_del = _btn("🗑  Remover", _RED, "#2a0a0a")
+        btn_del.clicked.connect(self._delete_selected)
+        blay.addWidget(btn_del)
+
+        ll.addWidget(btn_area)
+        return left
+
+    def _build_right_panel(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            f"QScrollArea{{border:none;background:{_DARK};}}")
+
+        right = QWidget()
+        right.setStyleSheet(f"background:{_DARK};")
+        self._right_lay = QVBoxLayout(right)
+        self._right_lay.setContentsMargins(16, 12, 16, 16)
+        self._right_lay.setSpacing(12)
+
+        # Placeholder
+        self._placeholder = QLabel(
+            "← Selecione uma regra ou clique em  + Regra  para começar")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(
+            f"color:{_MUTED};font-size:14px;padding:40px;")
+        self._right_lay.addWidget(self._placeholder)
+
+        # Editor (oculto inicialmente)
+        self._editor = QWidget()
+        ed_lay = QVBoxLayout(self._editor)
+        ed_lay.setContentsMargins(0, 0, 0, 0)
+        ed_lay.setSpacing(10)
+
+        # ── Cabeçalho da regra ────────────────────────────────────────────────
+        hdr_row = QHBoxLayout()
+        hdr_row.addWidget(_lbl("Nome:", _MUTED))
+        self._edit_name = _line("Nome da regra")
+        self._edit_name.setMinimumWidth(260)
+        hdr_row.addWidget(self._edit_name, 1)
+        self._chk_enabled = QCheckBox("Habilitada")
+        self._chk_enabled.setChecked(True)
+        self._chk_enabled.setStyleSheet(
+            f"QCheckBox{{color:{_GREEN};font-size:12px;font-weight:700;}}"
+            f"QCheckBox::indicator{{width:15px;height:15px;"
+            f"border:2px solid {_GREEN};border-radius:3px;background:{_SURFACE};}}"
+            f"QCheckBox::indicator:checked{{background:{_GREEN};}}")
+        hdr_row.addWidget(self._chk_enabled)
+        ed_lay.addLayout(hdr_row)
+
+        # Descrição opcional
+        desc_row = QHBoxLayout()
+        desc_row.addWidget(_lbl("Desc:", _MUTED))
+        self._edit_desc = _line("Descrição opcional da regra")
+        desc_row.addWidget(self._edit_desc, 1)
+        ed_lay.addLayout(desc_row)
+
+        ed_lay.addWidget(_sep())
+
+        # ── Condições ─────────────────────────────────────────────────────────
+        cond_hdr = QHBoxLayout()
+        cond_hdr.addWidget(_lbl("🔎  CONDIÇÕES", _ACCENT, True))
+        cond_hdr.addWidget(_lbl(" (sem condições → aplica a todos os registros)", _MUTED))
+        cond_hdr.addStretch()
+        cond_hdr.addWidget(_lbl("Lógica:", _MUTED))
+        self._rb_and = QRadioButton("AND")
+        self._rb_or = QRadioButton("OR")
+        self._rb_and.setChecked(True)
+        for rb in (self._rb_and, self._rb_or):
+            rb.setStyleSheet(f"QRadioButton{{color:{_TEXT};font-size:12px;}}")
+        cond_hdr.addWidget(self._rb_and)
+        cond_hdr.addWidget(self._rb_or)
+        ed_lay.addLayout(cond_hdr)
+
+        self._cond_container = QWidget()
+        self._cond_lay = QVBoxLayout(self._cond_container)
+        self._cond_lay.setContentsMargins(0, 0, 0, 0)
+        self._cond_lay.setSpacing(2)
+        ed_lay.addWidget(self._cond_container)
+
+        btn_add_cond = _btn("+ Adicionar Condição", _MUTED, _DARK, 180)
+        btn_add_cond.clicked.connect(lambda: self._add_condition_row())
+        ed_lay.addWidget(btn_add_cond, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        ed_lay.addWidget(_sep())
+
+        # ── Ações ─────────────────────────────────────────────────────────────
+        act_hdr = QHBoxLayout()
+        act_hdr.addWidget(_lbl("⚡  AÇÕES", _YELLOW, True))
+        act_hdr.addStretch()
+        self._lbl_fields_hint = _lbl("  Campos disponíveis carregam com a tabela", _MUTED)
+        act_hdr.addWidget(self._lbl_fields_hint)
+        ed_lay.addLayout(act_hdr)
+
+        self._act_container = QWidget()
+        self._act_lay = QVBoxLayout(self._act_container)
+        self._act_lay.setContentsMargins(0, 0, 0, 0)
+        self._act_lay.setSpacing(2)
+        ed_lay.addWidget(self._act_container)
+
+        btn_add_act = _btn("+ Adicionar Ação", _YELLOW, "#2a1a00", 160)
+        btn_add_act.clicked.connect(lambda: self._add_action_row())
+        ed_lay.addWidget(btn_add_act, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        ed_lay.addWidget(_sep())
+
+        # ── Área de fórmula de ajuda ───────────────────────────────────────────
+        help_gb = QGroupBox("📖  Ajuda rápida — Fórmulas & Referências")
+        help_gb.setStyleSheet(
+            f"QGroupBox{{color:{_MUTED};font-size:11px;font-weight:700;"
+            f"border:1px solid {_BORDER};border-radius:5px;margin-top:6px;padding:10px 8px 6px 8px;}}"
+            f"QGroupBox::title{{padding:0 4px;}}")
+        help_lay = QVBoxLayout(help_gb)
+        help_lay.setSpacing(2)
+        help_text = QLabel(
+            "<b>Referências de campo:</b>  <code>{NOME_DO_CAMPO}</code>  ou  "
+            "<code>NOME_DO_CAMPO</code> (sem espaços) em fórmulas<br>"
+            "<b>Matemática:</b>  <code>{PRECO} * {QTDE}</code> &nbsp;&nbsp; "
+            "<code>round({TOTAL} / 12, 2)</code> &nbsp;&nbsp; "
+            "<code>sqrt({AREA})</code><br>"
+            "<b>Texto:</b>  <code>{NOME} + ' ' + {SOBRENOME}</code> &nbsp;&nbsp; "
+            "<code>str({CODIGO}).zfill(10)</code><br>"
+            "<b>Condicional:</b>  <code>{VALOR} &gt; 0</code> → então <code>ATIVO</code> "
+            "senão <code>INATIVO</code><br>"
+            "<b>API:</b>  <code>https://api.exemplo.com/dados/{CODIGO}</code> &nbsp; "
+            "campo resposta: <code>result.value</code>"
+        )
+        help_text.setTextFormat(Qt.TextFormat.RichText)
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;background:transparent;")
+        help_lay.addWidget(help_text)
+        ed_lay.addWidget(help_gb)
+
+        # ── Botões de ação ────────────────────────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_test = _btn("🔍  Testar Prévia", _ACCENT, "#0a1a3a", 160)
+        btn_test.clicked.connect(self._preview_rule)
+        btn_row.addWidget(btn_test)
+
+        btn_save = _btn("💾  Salvar Regra", _GREEN, "#0a2a0a", 160)
+        btn_save.clicked.connect(self._save_rule)
+        btn_row.addWidget(btn_save)
+
+        btn_del_rule = _btn("🗑  Excluir Regra", _RED, "#2a0a0a", 150)
+        btn_del_rule.clicked.connect(self._delete_selected)
+        btn_row.addWidget(btn_del_rule)
+
+        btn_row.addStretch()
+        ed_lay.addLayout(btn_row)
+
+        self._editor.hide()
+        self._right_lay.addWidget(self._editor)
+        self._right_lay.addStretch()
+
+        scroll.setWidget(right)
+        return scroll
+
+    # ── Atualização da lista de tabelas ───────────────────────────────────────
+
+    def refresh_tables(self):
+        """Recarrega lista de tabelas carregadas no banco."""
+        tables = self.db.get_loaded_tables()
+        self._combo_table.blockSignals(True)
+        current = self._combo_table.currentText()
+        self._combo_table.clear()
+        self._combo_table.addItems(tables)
+        if current in tables:
+            self._combo_table.setCurrentText(current)
+        self._combo_table.blockSignals(False)
+        if tables:
+            self._on_table_changed(self._combo_table.currentText())
+        self._refresh_rule_list()
+
+    def _on_table_changed(self, table: str):
+        self._columns = self.db.get_table_columns(table) if table else []
+        # Atualiza campos nas linhas de condição e ação existentes
+        for cr in self._condition_rows:
+            cur = cr.combo_field.currentText()
+            cr.combo_field.clear()
+            cr.combo_field.addItems(self._columns)
+            idx = cr.combo_field.findText(cur)
+            if idx >= 0:
+                cr.combo_field.setCurrentIndex(idx)
+        for ar in self._action_rows:
+            cur = ar.combo_field.currentText()
+            ar.combo_field.clear()
+            ar.combo_field.addItems(self._columns)
+            idx = ar.combo_field.findText(cur)
+            if idx >= 0:
+                ar.combo_field.setCurrentIndex(idx)
+
+    # ── Lista de regras / pacotes ─────────────────────────────────────────────
+
+    def _refresh_rule_list(self):
+        self._rule_list.clear()
+
+        # Pacotes
+        for pkg in self.engine.packages:
+            it = QListWidgetItem(f"  📦  {pkg.get('name', '?')}")
+            it.setData(Qt.ItemDataRole.UserRole, ("pkg", pkg.get("id")))
+            it.setFont(QFont("", 12, QFont.Weight.Bold))
+            it.setForeground(Qt.GlobalColor.white)
+            self._rule_list.addItem(it)
+
+            # Regras dentro do pacote
+            for rule_id in pkg.get("rule_ids", []):
+                rule = self.engine.get_rule(rule_id)
+                if rule:
+                    icon = "●" if rule.get("enabled", True) else "○"
+                    it2 = QListWidgetItem(f"    {icon}  {rule.get('name', '?')}")
+                    it2.setData(Qt.ItemDataRole.UserRole, ("rule", rule.get("id")))
+                    it2.setForeground(Qt.GlobalColor.lightGray)
+                    self._rule_list.addItem(it2)
+
+        # Regras avulsas (não pertencentes a nenhum pacote)
+        pkg_rule_ids = set()
+        for pkg in self.engine.packages:
+            pkg_rule_ids.update(pkg.get("rule_ids", []))
+
+        standalone = [r for r in self.engine.rules
+                      if r.get("id") not in pkg_rule_ids]
+        if standalone:
+            sep_it = QListWidgetItem("  📋  Regras Avulsas")
+            sep_it.setData(Qt.ItemDataRole.UserRole, None)
+            sep_it.setFlags(sep_it.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            sep_it.setFont(QFont("", 11, QFont.Weight.Bold))
+            self._rule_list.addItem(sep_it)
+
+            for rule in standalone:
+                icon = "●" if rule.get("enabled", True) else "○"
+                it = QListWidgetItem(f"    {icon}  {rule.get('name', '?')}")
+                it.setData(Qt.ItemDataRole.UserRole, ("rule", rule.get("id")))
+                it.setForeground(Qt.GlobalColor.lightGray)
+                self._rule_list.addItem(it)
+
+    def _on_list_item_changed(self, item: Optional[QListWidgetItem], _prev=None):
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, obj_id = data
+        if kind == "rule":
+            self._current_rule_id = obj_id
+            self._current_pkg_id = None
+            rule = self.engine.get_rule(obj_id)
+            if rule:
+                self._load_rule_into_editor(rule)
+        elif kind == "pkg":
+            self._current_pkg_id = obj_id
+            self._current_rule_id = None
+            self._show_package_info(obj_id)
+
+    # ── Editor de regra ────────────────────────────────────────────────────────
+
+    def _show_editor(self):
+        self._placeholder.hide()
+        self._editor.show()
+
+    def _load_rule_into_editor(self, rule: Dict):
+        self._show_editor()
+        self._clear_conditions()
+        self._clear_actions()
+
+        self._edit_name.setText(rule.get("name", ""))
+        self._edit_desc.setText(rule.get("description", ""))
+        self._chk_enabled.setChecked(rule.get("enabled", True))
+        logic = rule.get("condition_logic", "AND")
+        self._rb_and.setChecked(logic == "AND")
+        self._rb_or.setChecked(logic == "OR")
+
+        for cond in rule.get("conditions", []):
+            row = self._add_condition_row()
+            row.load_dict(cond)
+
+        for act in rule.get("actions", []):
+            row = self._add_action_row()
+            row.load_dict(act)
+
+    def _show_package_info(self, pkg_id: str):
+        """Mostra informações do pacote (sem editor de regra individual)."""
+        pkg = self.engine.get_package(pkg_id)
+        if not pkg:
+            return
+        self._placeholder.setText(
+            f"📦  Pacote:  {pkg.get('name', '?')}\n\n"
+            f"Contém {len(pkg.get('rule_ids', []))} regra(s).\n\n"
+            f"Clique em  ▶▶ Executar Pacote  para executar todas as regras em sequência.\n"
+            f"Selecione uma regra na lista para editá-la.")
+        self._placeholder.show()
+        self._editor.hide()
+
+    def _collect_rule(self) -> Dict:
+        return {
+            "id": self._current_rule_id or str(uuid.uuid4()),
+            "name": self._edit_name.text() or "Sem nome",
+            "description": self._edit_desc.text(),
+            "enabled": self._chk_enabled.isChecked(),
+            "condition_logic": "OR" if self._rb_or.isChecked() else "AND",
+            "conditions": [cr.to_dict() for cr in self._condition_rows],
+            "actions": [ar.to_dict() for ar in self._action_rows],
+        }
+
+    # ── Condições ─────────────────────────────────────────────────────────────
+
+    def _add_condition_row(self, data: Optional[Dict] = None) -> ConditionRow:
+        row = ConditionRow(self._columns, self)
+        row.removed.connect(self._remove_condition_row)
+        self._cond_lay.addWidget(row)
+        self._condition_rows.append(row)
+        if data:
+            row.load_dict(data)
+        return row
+
+    def _remove_condition_row(self, row: ConditionRow):
+        self._condition_rows.remove(row)
+        self._cond_lay.removeWidget(row)
+        row.deleteLater()
+
+    def _clear_conditions(self):
+        for row in list(self._condition_rows):
+            self._cond_lay.removeWidget(row)
+            row.deleteLater()
+        self._condition_rows.clear()
+
+    # ── Ações ──────────────────────────────────────────────────────────────────
+
+    def _add_action_row(self, data: Optional[Dict] = None) -> ActionRow:
+        row = ActionRow(self._columns, self)
+        row.removed.connect(self._remove_action_row)
+        self._act_lay.addWidget(row)
+        self._action_rows.append(row)
+        if data:
+            row.load_dict(data)
+        return row
+
+    def _remove_action_row(self, row: ActionRow):
+        self._action_rows.remove(row)
+        self._act_lay.removeWidget(row)
+        row.deleteLater()
+
+    def _clear_actions(self):
+        for row in list(self._action_rows):
+            self._act_lay.removeWidget(row)
+            row.deleteLater()
+        self._action_rows.clear()
+
+    # ── CRUD ──────────────────────────────────────────────────────────────────
+
+    def _new_rule(self):
+        self._current_rule_id = None
+        self._current_pkg_id = None
+        self._clear_conditions()
+        self._clear_actions()
+        self._edit_name.setText("")
+        self._edit_desc.setText("")
+        self._chk_enabled.setChecked(True)
+        self._rb_and.setChecked(True)
+        self._show_editor()
+        self._edit_name.setFocus()
+        self._set_status("Nova regra — configure as condições e ações, depois clique em 💾 Salvar.")
+
+    def _new_package(self):
+        name, ok = QInputDialog.getText(self, "Novo Pacote", "Nome do pacote:")
+        if ok and name.strip():
+            pkg = {"name": name.strip(), "rule_ids": [], "stop_on_error": False}
+            self.engine.upsert_package(pkg)
+            self._refresh_rule_list()
+            self._set_status(f"Pacote '{name}' criado.")
+
+    def _add_rule_to_package(self):
+        if not self._current_rule_id:
+            self._set_status("Selecione uma regra avulsa primeiro.", error=True)
+            return
+        pkgs = self.engine.packages
+        if not pkgs:
+            self._set_status("Crie um pacote primeiro.", error=True)
+            return
+        pkg_names = [p.get("name", "?") for p in pkgs]
+        name, ok = QInputDialog.getItem(self, "Adicionar ao Pacote",
+                                         "Escolha o pacote:", pkg_names, 0, False)
+        if not ok:
+            return
+        pkg = pkgs[pkg_names.index(name)]
+        rule_ids = pkg.get("rule_ids", [])
+        if self._current_rule_id not in rule_ids:
+            rule_ids.append(self._current_rule_id)
+            pkg["rule_ids"] = rule_ids
+            self.engine.upsert_package(pkg)
+            self._refresh_rule_list()
+            self._set_status(f"Regra adicionada ao pacote '{name}'.")
+
+    def _save_rule(self):
+        rule = self._collect_rule()
+        if not rule["name"].strip() or rule["name"] == "Sem nome":
+            self._set_status("Informe um nome para a regra.", error=True)
+            return
+        if not rule["actions"]:
+            self._set_status("Adicione ao menos uma ação.", error=True)
+            return
+        self._current_rule_id = self.engine.upsert_rule(rule)
+        self._refresh_rule_list()
+        self._set_status(f"✔ Regra '{rule['name']}' salva.")
+
+    def _delete_selected(self):
+        item = self._rule_list.currentItem()
+        if not item:
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, obj_id = data
+        name = item.text().strip()
+        r = QMessageBox.question(self, "Remover", f"Remover '{name}'?")
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        if kind == "rule":
+            self.engine.delete_rule(obj_id)
+        elif kind == "pkg":
+            self.engine.delete_package(obj_id)
+        self._current_rule_id = None
+        self._current_pkg_id = None
+        self._placeholder.setText(
+            "← Selecione uma regra ou clique em  + Regra  para começar")
+        self._placeholder.show()
+        self._editor.hide()
+        self._refresh_rule_list()
+
+    # ── Execução ──────────────────────────────────────────────────────────────
+
+    def _get_table(self) -> Optional[str]:
+        table = self._combo_table.currentText()
+        if not table:
+            self._set_status("Nenhuma tabela selecionada — carregue um arquivo primeiro.", error=True)
+            return None
+        if table not in self.db.get_loaded_tables():
+            self._set_status(f"Tabela '{table}' não está carregada.", error=True)
+            return None
+        return table
+
+    def _exec_current_rule(self):
+        table = self._get_table()
+        if not table:
+            return
+        if not self._current_rule_id:
+            self._set_status("Selecione uma regra para executar.", error=True)
+            return
+        rule = self.engine.get_rule(self._current_rule_id)
+        if not rule:
+            return
+        confirm = QMessageBox.question(
+            self, "Executar Regra",
+            f"Executar a regra  '{rule.get('name')}'  sobre a tabela  '{table}'?\n\n"
+            f"Esta operação modificará os dados na memória.")
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        n, errors = self.engine.execute_rule(rule, self.db, table)
+        self._show_exec_result(rule.get("name", "?"), n, errors)
+        if n > 0:
+            self.dataChanged.emit()
+
+    def _exec_current_pkg(self):
+        table = self._get_table()
+        if not table:
+            return
+        if not self._current_pkg_id:
+            self._set_status("Selecione um pacote para executar.", error=True)
+            return
+        pkg = self.engine.get_package(self._current_pkg_id)
+        if not pkg:
+            return
+        confirm = QMessageBox.question(
+            self, "Executar Pacote",
+            f"Executar o pacote  '{pkg.get('name')}'  sobre a tabela  '{table}'?\n\n"
+            f"As regras serão executadas em sequência.")
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        results = self.engine.execute_package(self._current_pkg_id, self.db, table)
+        total = sum(n for _, n, _ in results)
+        all_errors = []
+        lines = []
+        for rname, n, errs in results:
+            lines.append(f"• {rname}: {n} linha(s) modificada(s)")
+            all_errors.extend(errs)
+        summary = "\n".join(lines) or "Nenhuma regra executada."
+        if all_errors:
+            summary += "\n\nErros:\n" + "\n".join(all_errors[:10])
+        QMessageBox.information(
+            self, "Resultado do Pacote",
+            f"Pacote: {pkg.get('name')}\nTabela: {table}\n\n"
+            f"Total: {total} linha(s) modificada(s)\n\n{summary}")
+        if total > 0:
+            self.dataChanged.emit()
+
+    def _preview_rule(self):
+        """Executa a regra em modo preview (só retorna amostra sem gravar)."""
+        table = self._get_table()
+        if not table:
+            return
+        rule = self._collect_rule()
+        if not rule["actions"]:
+            self._set_status("Adicione ao menos uma ação para prévia.", error=True)
+            return
+
+        from core.rule_engine import evaluate_conditions
+        from core.database import ROW_ID_COL
+        try:
+            with self.db._lock:
+                cur = self.db.conn.cursor()
+                cur.execute(f'SELECT * FROM "{table}" LIMIT 200')
+                cols = [d[0] for d in cur.description]
+                rows_data = cur.fetchall()
+        except Exception as exc:
+            self._set_status(f"Erro ao ler tabela: {exc}", error=True)
+            return
+
+        matches = []
+        conditions = rule.get("conditions", [])
+        logic = rule.get("condition_logic", "AND")
+        for rt in rows_data:
+            row = dict(zip(cols, rt))
+            if evaluate_conditions(conditions, logic, row):
+                matches.append(row)
+
+        dlg = PreviewDialog(matches[:20], rule, self._columns, self)
+        dlg.exec()
+
+    def _show_exec_result(self, rule_name: str, modified: int, errors: List[str]):
+        if errors:
+            msg = (f"Regra: {rule_name}\n{modified} linha(s) modificada(s)\n\n"
+                   f"Avisos/Erros:\n" + "\n".join(errors[:15]))
+            QMessageBox.warning(self, "Execução concluída com avisos", msg)
+        else:
+            QMessageBox.information(
+                self, "Execução concluída",
+                f"Regra: {rule_name}\n✔  {modified} linha(s) modificada(s).")
+        self._set_status(f"✔ {modified} linha(s) modificada(s) pela regra '{rule_name}'.")
+
+    def _set_status(self, msg: str, error: bool = False):
+        color = _RED if error else _MUTED
+        self._lbl_status.setStyleSheet(
+            f"background:{_SURFACE};color:{color};font-size:11px;padding:4px 12px;")
+        self._lbl_status.setText(msg)
+
+
+# ─── Separador vertical ────────────────────────────────────────────────────────
+
+def _sep_v() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.VLine)
+    f.setStyleSheet(f"color:{_BORDER};background:{_BORDER};")
+    f.setFixedWidth(1)
+    return f
+
+
+# ─── Diálogo de Prévia ─────────────────────────────────────────────────────────
+
+class PreviewDialog(QDialog):
+    """Mostra uma amostra dos registros que serão afetados pela regra."""
+
+    def __init__(self, matching_rows: List[Dict], rule: Dict,
+                 columns: List[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Prévia da Regra")
+        self.setMinimumSize(700, 500)
+        self.setStyleSheet(f"background:{_DARK};color:{_TEXT};")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(10)
+
+        info = QLabel(
+            f"<b>{len(matching_rows)}</b> registro(s) serão afetados "
+            f"(amostra de até 20).<br>"
+            f"<span style='color:{_MUTED};font-size:11px;'>"
+            f"Os valores abaixo mostram o resultado <i>simulado</i> das ações — "
+            f"nada foi gravado ainda.</span>")
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setWordWrap(True)
+        lay.addWidget(info)
+
+        # Aplica ações simuladas
+        from core.rule_engine import RuleEngine
+        _eng = RuleEngine.__new__(RuleEngine)
+        _eng._rules = []
+        _eng._packages = []
+        previews = []
+        for row in matching_rows:
+            sim = dict(row)
+            for action in rule.get("actions", []):
+                field = action.get("field", "")
+                if field:
+                    try:
+                        val = _eng._apply_action(
+                            action.get("type", "set_value"), action, field, sim, [])
+                        if val is not None:
+                            sim[field] = val
+                    except Exception:
+                        pass
+            previews.append((row, sim))
+
+        text = QTextEdit()
+        text.setReadOnly(True)
+        text.setStyleSheet(
+            f"QTextEdit{{background:{_SURFACE};color:{_TEXT};"
+            f"border:1px solid {_BORDER};border-radius:5px;font-family:monospace;font-size:11px;}}")
+
+        lines = []
+        action_fields = [a.get("field", "") for a in rule.get("actions", [])]
+        for orig, sim in previews:
+            parts = []
+            for f in action_fields:
+                ov = orig.get(f, "")
+                nv = sim.get(f, "")
+                if ov != nv:
+                    parts.append(f"{f}: '{ov}' → '{nv}'")
+            if parts:
+                lines.append("  |  ".join(parts))
+        text.setPlainText("\n".join(lines) if lines else "(Nenhuma diferença detectada na amostra)")
+        lay.addWidget(text, 1)
+
+        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btns.rejected.connect(self.reject)
+        btns.setStyleSheet(f"color:{_TEXT};")
+        lay.addWidget(btns)
