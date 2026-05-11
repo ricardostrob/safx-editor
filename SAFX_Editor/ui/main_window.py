@@ -425,6 +425,8 @@ class MainWindow(QMainWindow):
         from ui.rules_tab import RulesTab
         self.rules_tab = RulesTab(self.db, self)
         self.rules_tab.dataChanged.connect(self._on_rules_data_changed)
+        # Quando o usuário troca de tabela pelo combo das Regras, sincroniza tudo
+        self.rules_tab.tableActivated.connect(self._select_table)
         self.tab_widget.addTab(self.rules_tab, "  ⚡ Regras  ")
 
         self.tab_widget.currentChanged.connect(self._on_tab_changed)

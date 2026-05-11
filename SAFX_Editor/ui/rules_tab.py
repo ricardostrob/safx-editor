@@ -468,6 +468,8 @@ class RulesTab(QWidget):
 
     # Emitido quando uma regra modifica dados — para recarregar a grade
     dataChanged = pyqtSignal()
+    # Emitido quando o usuário muda a tabela pelo combo — sincroniza header principal
+    tableActivated = pyqtSignal(str)
 
     def __init__(self, db, parent=None):
         super().__init__(parent)
@@ -478,6 +480,7 @@ class RulesTab(QWidget):
         self._columns: List[str] = []
         self._condition_rows: List[ConditionRow] = []
         self._action_rows: List[ActionRow] = []
+        self._in_sync = False   # evita loop de sinalização
         self._build()
 
     # ── Construção da UI ──────────────────────────────────────────────────────
@@ -776,20 +779,23 @@ class RulesTab(QWidget):
 
     def set_active_table(self, table_name: str):
         """Sincroniza o combo de tabelas com a tabela selecionada na sidebar principal."""
-        tables = self.db.get_loaded_tables()
-        self._combo_table.blockSignals(True)
-        self._combo_table.clear()
-        self._combo_table.addItems(tables)
-        if table_name in tables:
-            self._combo_table.setCurrentText(table_name)
-        elif tables:
-            self._combo_table.setCurrentIndex(0)
-        self._combo_table.blockSignals(False)
-        # Atualiza campos para a tabela selecionada
-        selected = self._combo_table.currentText()
-        if selected:
-            self._on_table_changed(selected)
-        self._refresh_rule_list()
+        self._in_sync = True
+        try:
+            tables = self.db.get_loaded_tables()
+            self._combo_table.blockSignals(True)
+            self._combo_table.clear()
+            self._combo_table.addItems(tables)
+            if table_name in tables:
+                self._combo_table.setCurrentText(table_name)
+            elif tables:
+                self._combo_table.setCurrentIndex(0)
+            self._combo_table.blockSignals(False)
+            selected = self._combo_table.currentText()
+            if selected:
+                self._on_table_changed(selected)
+            self._refresh_rule_list()
+        finally:
+            self._in_sync = False
 
     def _on_table_changed(self, table: str):
         self._columns = self.db.get_table_columns(table) if table else []
@@ -804,6 +810,10 @@ class RulesTab(QWidget):
         # Atualiza campos nas linhas de ação (incluindo combos aninhados)
         for ar in self._action_rows:
             ar.update_columns(self._columns)
+        # Notifica o main_window para sincronizar header e sidebar
+        # _in_sync evita loop quando main_window já iniciou a troca
+        if not self._in_sync and table:
+            self.tableActivated.emit(table)
 
     # ── Lista de regras / pacotes ─────────────────────────────────────────────
 
