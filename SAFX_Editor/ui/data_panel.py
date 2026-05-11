@@ -640,7 +640,9 @@ class DataPanel(QWidget):
         # ── Tabela ──
         self.table_view = QTableView()
         self.table_view.setAlternatingRowColors(True)
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        # SelectItems: permite selecionar células/colunas individualmente (como PL/SQL)
+        # O header-click seleciona a coluna inteira; Ctrl+header adiciona outra coluna.
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_view.setSortingEnabled(False)
         self.table_view.verticalHeader().setDefaultSectionSize(30)  # linhas mais altas
@@ -1002,18 +1004,39 @@ class DataPanel(QWidget):
     # ─── Menu de contexto e Edição em Lote ───────────────────────────────────
 
     def _on_column_header_clicked(self, logical_index: int):
-        """Seleciona toda a coluna ao clicar no cabeçalho — habilita edição em lote."""
+        """Seleciona a coluna ao clicar no cabeçalho (como PL/SQL).
+
+        - Clique simples  → seleciona somente essa coluna
+        - Ctrl+clique     → adiciona coluna à seleção atual
+        - Shift+clique    → estende seleção da última coluna até esta
+        """
         model = self.table_view.model()
         if not model or model.rowCount() == 0:
             return
-        # Seleciona todas as linhas da coluna usando SelectionFlag.Rows para
-        # compatibilidade com SelectionBehavior.SelectRows (linhas inteiras destacadas)
+
+        mods = QApplication.keyboardModifiers()
         top = model.index(0, logical_index)
         bottom = model.index(model.rowCount() - 1, logical_index)
-        self.table_view.selectionModel().select(
-            QItemSelection(top, bottom),
-            _QISModel.SelectionFlag.ClearAndSelect | _QISModel.SelectionFlag.Rows
-        )
+        col_sel = QItemSelection(top, bottom)
+
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl: adiciona coluna à seleção existente
+            self.table_view.selectionModel().select(
+                col_sel, _QISModel.SelectionFlag.Select)
+        elif mods & Qt.KeyboardModifier.ShiftModifier and self._last_header_col >= 0:
+            # Shift: seleciona range de colunas entre a última e esta
+            c_start = min(self._last_header_col, logical_index)
+            c_end   = max(self._last_header_col, logical_index)
+            range_sel = QItemSelection(
+                model.index(0, c_start),
+                model.index(model.rowCount() - 1, c_end))
+            self.table_view.selectionModel().select(
+                range_sel, _QISModel.SelectionFlag.ClearAndSelect)
+        else:
+            # Clique simples: seleciona só esta coluna
+            self.table_view.selectionModel().select(
+                col_sel, _QISModel.SelectionFlag.ClearAndSelect)
+
         self._last_header_col = logical_index
 
     def _show_table_context_menu(self, pos):
@@ -1022,20 +1045,11 @@ class DataPanel(QWidget):
 
         idx = self.table_view.indexAt(pos)
         selected_indexes = self.table_view.selectedIndexes()
+        # Linhas únicas presentes na seleção (para edição em lote)
         selected_rows = list({i.row() for i in selected_indexes})
         n = len(selected_rows)
-
-        # Detecta se o usuário clicou no cabeçalho (coluna inteira selecionada)
-        # Nesse caso usa a coluna do header como referência para edição em lote
-        header_col = getattr(self, '_last_header_col', -1)
-        if header_col >= 0 and selected_indexes:
-            selected_cols = {i.column() for i in selected_indexes}
-            # Se todas as seleções são da mesma coluna (típico do header click)
-            if len(selected_cols) == 1 and header_col in selected_cols:
-                # Garante que idx aponte para a coluna correta
-                if not idx.isValid():
-                    idx = self.model.index(0, header_col)
-        self._last_header_col = -1  # reseta após usar
+        # Colunas selecionadas (para bulk-edit por coluna)
+        selected_cols = sorted({i.column() for i in selected_indexes})
 
         menu = QMenu(self.table_view)
         menu.setStyleSheet(
@@ -1046,14 +1060,45 @@ class DataPanel(QWidget):
             "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
             "QMenu::separator{height:1px;background:#45475a;margin:4px 8px;}")
 
-        # Edição em lote — só se há seleção e coluna válida
-        if n > 0 and idx.isValid():
-            col_name = self.model._columns[idx.column()] if idx.column() < len(self.model._columns) else ''
+        # Edição em lote — se há seleção
+        if n > 0 and selected_cols:
+            # Coluna da célula clicada (prioridade); senão a única coluna selecionada
+            if idx.isValid() and idx.column() in selected_cols:
+                edit_col_idx = idx.column()
+            else:
+                edit_col_idx = selected_cols[0]
+
+            col_name = (self.model._columns[edit_col_idx]
+                        if edit_col_idx < len(self.model._columns) else '')
+
             if col_name and col_name != ROW_ID_COL:
-                act_bulk = menu.addAction(f"✎  Editar em lote — {n} linha(s) no campo '{col_name}'")
+                # Linhas selecionadas especificamente nesta coluna
+                rows_in_col = sorted({i.row() for i in selected_indexes
+                                      if i.column() == edit_col_idx})
+                lbl_rows = rows_in_col if rows_in_col else selected_rows
+                act_bulk = menu.addAction(
+                    f"✎  Editar em lote — {len(lbl_rows)} linha(s) no campo '{col_name}'")
                 act_bulk.triggered.connect(
-                    lambda: self._open_bulk_edit(col_name, selected_rows))
-                menu.addSeparator()
+                    lambda _c=col_name, _r=lbl_rows: self._open_bulk_edit(_c, _r))
+
+            # Se há múltiplas colunas selecionadas, oferece bulk-edit para cada uma
+            if len(selected_cols) > 1:
+                other_cols = [c for c in selected_cols if c != edit_col_idx
+                              and c < len(self.model._columns)
+                              and self.model._columns[c] != ROW_ID_COL]
+                if other_cols:
+                    sub = menu.addMenu("✎  Editar outra coluna selecionada")
+                    for ci in other_cols[:10]:
+                        cn = self.model._columns[ci]
+                        rows_ci = sorted({i.row() for i in selected_indexes
+                                         if i.column() == ci})
+                        lbl = rows_ci if rows_ci else selected_rows
+                        sub.addAction(
+                            f"{cn}  ({len(lbl)} linha(s))"
+                        ).triggered.connect(
+                            lambda _cn=cn, _lbl=lbl: self._open_bulk_edit(_cn, _lbl))
+
+            menu.addSeparator()
 
         # Copiar
         act_copy = menu.addAction("📋  Copiar células selecionadas")
