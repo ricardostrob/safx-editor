@@ -466,6 +466,7 @@ class DataPanel(QWidget):
         self._total_rows = 0
         self._active_filters: Dict[str, str] = {}
         self._pending_changes: List[Dict] = []  # alterações ainda não commitadas no log
+        self._last_header_col: int = -1         # coluna selecionada via clique no cabeçalho
 
         self._setup_ui()
 
@@ -589,6 +590,10 @@ class DataPanel(QWidget):
         # Permite arrastar colunas para reorganizar — mantém todas as colunas visíveis
         self.table_view.horizontalHeader().setSectionsMovable(True)
         self.table_view.horizontalHeader().setDragEnabled(True)
+        # Clique no cabeçalho: seleciona a coluna inteira para edição em lote
+        # (setSectionsMovable desabilita esse comportamento padrão; reconecta manualmente)
+        self.table_view.horizontalHeader().sectionClicked.connect(
+            self._on_column_header_clicked)
         self.table_view.setShowGrid(True)
         self.table_view.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked |
@@ -900,13 +905,32 @@ class DataPanel(QWidget):
 
     # ─── Menu de contexto e Edição em Lote ───────────────────────────────────
 
+    def _on_column_header_clicked(self, logical_index: int):
+        """Seleciona toda a coluna ao clicar no cabeçalho — habilita edição em lote."""
+        self.table_view.selectColumn(logical_index)
+        # Registra a coluna selecionada via header para o menu de contexto
+        self._last_header_col = logical_index
+
     def _show_table_context_menu(self, pos):
         from PyQt6.QtWidgets import QMenu
         from PyQt6.QtGui import QAction
 
         idx = self.table_view.indexAt(pos)
-        selected_rows = list({i.row() for i in self.table_view.selectedIndexes()})
+        selected_indexes = self.table_view.selectedIndexes()
+        selected_rows = list({i.row() for i in selected_indexes})
         n = len(selected_rows)
+
+        # Detecta se o usuário clicou no cabeçalho (coluna inteira selecionada)
+        # Nesse caso usa a coluna do header como referência para edição em lote
+        header_col = getattr(self, '_last_header_col', -1)
+        if header_col >= 0 and selected_indexes:
+            selected_cols = {i.column() for i in selected_indexes}
+            # Se todas as seleções são da mesma coluna (típico do header click)
+            if len(selected_cols) == 1 and header_col in selected_cols:
+                # Garante que idx aponte para a coluna correta
+                if not idx.isValid():
+                    idx = self.model.index(0, header_col)
+        self._last_header_col = -1  # reseta após usar
 
         menu = QMenu(self.table_view)
         menu.setStyleSheet(
