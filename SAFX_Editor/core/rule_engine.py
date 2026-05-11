@@ -202,9 +202,24 @@ def check_condition(cond: Dict, row: Dict[str, Any]) -> bool:
     cell = str(row.get(field, "")) if row.get(field) is not None else ""
 
     if op == "equals":
-        return cell.strip().lower() == ref_value.strip().lower()
+        c = cell.strip()
+        r = ref_value.strip()
+        if c.lower() == r.lower():
+            return True
+        # Normalização numérica: '001' == '1', '0079' == '79'
+        try:
+            return float(c.replace(',', '.')) == float(r.replace(',', '.'))
+        except (ValueError, TypeError):
+            return False
     if op == "not_equals":
-        return cell.strip().lower() != ref_value.strip().lower()
+        c = cell.strip()
+        r = ref_value.strip()
+        if c.lower() == r.lower():
+            return False
+        try:
+            return float(c.replace(',', '.')) != float(r.replace(',', '.'))
+        except (ValueError, TypeError):
+            return True
     if op == "contains":
         return ref_value.lower() in cell.lower()
     if op == "not_contains":

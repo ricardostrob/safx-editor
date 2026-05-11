@@ -5,7 +5,8 @@ import logging
 from typing import List, Dict, Optional, Set, Tuple
 
 from PyQt6.QtCore import (Qt, QAbstractTableModel, QModelIndex, QThread,
-                           pyqtSignal, QTimer, QSortFilterProxyModel)
+                           pyqtSignal, QTimer, QSortFilterProxyModel,
+                           QItemSelection)
 from PyQt6.QtGui import QColor, QFont, QBrush, QIcon, QKeySequence
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableView,
                               QLineEdit, QPushButton, QLabel, QComboBox,
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableView,
                               QScrollArea, QSizePolicy, QToolButton,
                               QSpacerItem, QMessageBox, QApplication,
                               QSplitter, QMenu)
+from PyQt6.QtCore import QItemSelectionModel as _QISModel
 
 from core.database import SAFXDatabase, ROW_ID_COL
 from core.layout_manager import TableLayout
@@ -292,7 +294,9 @@ class FilterBar(QWidget):
         # Linha 1: título + botões de ação
         # Linha 2: resumo dos filtros ativos
         # ══════════════════════════════════════════════
+        self._theme = 'dark'
         toolbar = QWidget()
+        self._toolbar_widget = toolbar
         toolbar.setStyleSheet("background:#181825; border-bottom:1px solid #313244;")
         tb_outer = QVBoxLayout(toolbar)
         tb_outer.setContentsMargins(8, 4, 8, 4)
@@ -304,10 +308,10 @@ class FilterBar(QWidget):
         row1_lay.setContentsMargins(0, 0, 0, 0)
         row1_lay.setSpacing(6)
 
-        lbl = QLabel("🔎  FILTROS")
-        lbl.setStyleSheet(
+        self._lbl_title = QLabel("🔎  FILTROS")
+        self._lbl_title.setStyleSheet(
             "color:#89b4fa; font-size:12px; font-weight:800; letter-spacing:1px;")
-        row1_lay.addWidget(lbl)
+        row1_lay.addWidget(self._lbl_title)
 
         row1_lay.addStretch()   # empurra botões para a direita, MAS stretch é antes dos btns
 
@@ -321,25 +325,25 @@ class FilterBar(QWidget):
         self.btn_add.clicked.connect(self.add_filter_row)
         row1_lay.addWidget(self.btn_add)
 
-        btn_apply = QPushButton("▶ Aplicar")
-        btn_apply.setFixedHeight(28)
-        btn_apply.setMinimumWidth(80)
-        btn_apply.setStyleSheet(
+        self._btn_apply = QPushButton("▶ Aplicar")
+        self._btn_apply.setFixedHeight(28)
+        self._btn_apply.setMinimumWidth(80)
+        self._btn_apply.setStyleSheet(
             "QPushButton{background:#1e4a8a;color:#89b4fa;border:none;"
             "border-radius:5px;font-size:12px;font-weight:700;padding:0 8px;}"
             "QPushButton:hover{background:#2a5fa0;color:white;}")
-        btn_apply.clicked.connect(self._emit_filters)
-        row1_lay.addWidget(btn_apply)
+        self._btn_apply.clicked.connect(self._emit_filters)
+        row1_lay.addWidget(self._btn_apply)
 
-        btn_clear = QPushButton("✕ Limpar Tudo")
-        btn_clear.setFixedHeight(28)
-        btn_clear.setMinimumWidth(100)
-        btn_clear.setStyleSheet(
+        self._btn_clear = QPushButton("✕ Limpar Tudo")
+        self._btn_clear.setFixedHeight(28)
+        self._btn_clear.setMinimumWidth(100)
+        self._btn_clear.setStyleSheet(
             "QPushButton{background:#2a1a1a;color:#f38ba8;border:1px solid #45475a;"
             "border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}"
             "QPushButton:hover{background:#3a2020;color:#ff9fb0;}")
-        btn_clear.clicked.connect(self.clear_all)
-        row1_lay.addWidget(btn_clear)
+        self._btn_clear.clicked.connect(self.clear_all)
+        row1_lay.addWidget(self._btn_clear)
 
         tb_outer.addWidget(row1)
 
@@ -421,22 +425,6 @@ class FilterBar(QWidget):
         self._update_label()
         self.filterChanged.emit(filters)
 
-    def _update_label(self):
-        active = {f: v for row in self._rows
-                  for f, v in [(row.get_field(), row.get_value())]
-                  if f and v}
-        if active:
-            parts = [f"  {f} = {v[:25]!r}" for f, v in list(active.items())[:6]]
-            text = f"✔ {len(active)} filtro(s) ativo(s):  " + "   AND   ".join(parts)
-            self.lbl_active.setText(text)
-            self.lbl_active.setStyleSheet(
-                "color:#89b4fa; font-size:11px; font-weight:600; font-style:normal;")
-        else:
-            self.lbl_active.setText(
-                "Nenhum filtro ativo — clique em '+ Adicionar Filtro' para começar")
-            self.lbl_active.setStyleSheet(
-                "color:#6c7086; font-size:11px; font-style:italic;")
-
     def clear_all(self):
         while len(self._rows) > 1:
             row = self._rows[-1]
@@ -447,6 +435,77 @@ class FilterBar(QWidget):
             self._rows[0].value_edit.clear()
         self._update_label()
         self.filterChanged.emit({})
+
+    # ── Paletas de tema ───────────────────────────────────────────────────────
+
+    _DARK = {
+        'toolbar_bg': 'background:#181825; border-bottom:1px solid #313244;',
+        'lbl_title':  'color:#89b4fa; font-size:12px; font-weight:800; letter-spacing:1px;',
+        'btn_add':    ('QPushButton{background:#313244;color:#cdd6f4;border:none;'
+                       'border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}'
+                       'QPushButton:hover{background:#45475a;color:white;}'),
+        'btn_apply':  ('QPushButton{background:#1e4a8a;color:#89b4fa;border:none;'
+                       'border-radius:5px;font-size:12px;font-weight:700;padding:0 8px;}'
+                       'QPushButton:hover{background:#2a5fa0;color:white;}'),
+        'btn_clear':  ('QPushButton{background:#2a1a1a;color:#f38ba8;border:1px solid #45475a;'
+                       'border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}'
+                       'QPushButton:hover{background:#3a2020;color:#ff9fb0;}'),
+        'scroll':     ('QScrollArea{background:#1a1a2e;border:none;}'
+                       'QScrollBar:vertical{width:8px;background:#13131f;}'
+                       'QScrollBar::handle:vertical{background:#45475a;border-radius:4px;}'),
+        'container':  'background:#1a1a2e;',
+        'lbl_active_on':  'color:#89b4fa; font-size:11px; font-weight:600; font-style:normal;',
+        'lbl_active_off': 'color:#6c7086; font-size:11px; font-style:italic;',
+    }
+
+    _LIGHT = {
+        'toolbar_bg': 'background:#dde1ea; border-bottom:1px solid #b8bcd0;',
+        'lbl_title':  'color:#1a5ab4; font-size:12px; font-weight:800; letter-spacing:1px;',
+        'btn_add':    ('QPushButton{background:#e0e4ed;color:#1a1a2e;border:1px solid #b8bcd0;'
+                       'border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}'
+                       'QPushButton:hover{background:#c8cbdc;color:#1a1a2e;}'),
+        'btn_apply':  ('QPushButton{background:#4a90d9;color:white;border:none;'
+                       'border-radius:5px;font-size:12px;font-weight:700;padding:0 8px;}'
+                       'QPushButton:hover{background:#3a7ac9;color:white;}'),
+        'btn_clear':  ('QPushButton{background:#fce8ec;color:#c0392b;border:1px solid #e0b0b8;'
+                       'border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}'
+                       'QPushButton:hover{background:#f5c0c8;color:#a0232b;}'),
+        'scroll':     ('QScrollArea{background:#f0f2f5;border:none;}'
+                       'QScrollBar:vertical{width:8px;background:#e0e4ed;}'
+                       'QScrollBar::handle:vertical{background:#b8bcd0;border-radius:4px;}'),
+        'container':  'background:#f0f2f5;',
+        'lbl_active_on':  'color:#1a5ab4; font-size:11px; font-weight:600; font-style:normal;',
+        'lbl_active_off': 'color:#7090a0; font-size:11px; font-style:italic;',
+    }
+
+    def apply_theme(self, theme: str = 'dark'):
+        p = self._LIGHT if theme == 'light' else self._DARK
+        self._toolbar_widget.setStyleSheet(p['toolbar_bg'])
+        self._lbl_title.setStyleSheet(p['lbl_title'])
+        self.btn_add.setStyleSheet(p['btn_add'])
+        self._btn_apply.setStyleSheet(p['btn_apply'])
+        self._btn_clear.setStyleSheet(p['btn_clear'])
+        self._scroll.setStyleSheet(p['scroll'])
+        self._rows_container.setStyleSheet(p['container'])
+        # Atualiza label de status com a paleta correta
+        self._theme = theme
+        self._update_label()
+
+    def _update_label(self):
+        theme = getattr(self, '_theme', 'dark')
+        p = self._LIGHT if theme == 'light' else self._DARK
+        active = {f: v for row in self._rows
+                  for f, v in [(row.get_field(), row.get_value())]
+                  if f and v}
+        if active:
+            parts = [f"  {f} = {v[:25]!r}" for f, v in list(active.items())[:6]]
+            text = f"✔ {len(active)} filtro(s) ativo(s):  " + "   AND   ".join(parts)
+            self.lbl_active.setText(text)
+            self.lbl_active.setStyleSheet(p['lbl_active_on'])
+        else:
+            self.lbl_active.setText(
+                "Nenhum filtro ativo — clique em '+ Adicionar Filtro' para começar")
+            self.lbl_active.setStyleSheet(p['lbl_active_off'])
 
 
 class DataPanel(QWidget):
@@ -502,6 +561,7 @@ class DataPanel(QWidget):
         filter_panel = QWidget()
         filter_panel.setObjectName("filterPanel")
         filter_panel.setStyleSheet("#filterPanel { background:#1a1a2e; }")
+        self._filter_panel = filter_panel
         fp_layout = QVBoxLayout(filter_panel)
         fp_layout.setContentsMargins(0, 0, 0, 0)
         fp_layout.setSpacing(0)
@@ -523,6 +583,7 @@ class DataPanel(QWidget):
         info_bar = QWidget()
         info_bar.setFixedHeight(44)
         info_bar.setStyleSheet("background:#1e1e2e; border-bottom:1px solid #26263a;")
+        self._info_bar = info_bar
         info_layout = QHBoxLayout(info_bar)
         info_layout.setContentsMargins(12, 4, 12, 4)
         info_layout.setSpacing(8)
@@ -630,6 +691,7 @@ class DataPanel(QWidget):
         pagination = QWidget()
         pagination.setFixedHeight(38)
         pagination.setStyleSheet("background:#181825; border-top:1px solid #313244;")
+        self._pagination_bar = pagination
         pag_layout = QHBoxLayout(pagination)
         pag_layout.setContentsMargins(12, 4, 12, 4)
         pag_layout.setSpacing(8)
@@ -664,6 +726,40 @@ class DataPanel(QWidget):
         pag_layout.addWidget(self.combo_page_size)
 
         main_layout.addWidget(pagination)
+
+    # ─── Tema ─────────────────────────────────────────────────────────────────
+
+    def apply_theme(self, theme: str = 'dark'):
+        """Atualiza inline styles tema-dependentes do painel."""
+        self.filter_bar.apply_theme(theme)
+        if theme == 'light':
+            self._filter_panel.setStyleSheet("#filterPanel { background:#f0f2f5; }")
+            self._info_bar.setStyleSheet(
+                "background:#e8eaf0; border-bottom:1px solid #c8cbd8;")
+            self.lbl_rows.setStyleSheet("color:#5a6070; font-size:12px;")
+            self.lbl_modified.setStyleSheet(
+                "color:#1a7a3a; font-size:12px; font-weight:600;")
+            self.btn_cancel_changes.setStyleSheet(
+                "QPushButton{background:#fce8ec;color:#c0392b;border:1px solid #e0b0b8;"
+                "border-radius:6px;font-size:12px;font-weight:700;}"
+                "QPushButton:hover{background:#f5c0c8;}")
+            self._pagination_bar.setStyleSheet(
+                "background:#dde1ea; border-top:1px solid #b8bcd0;")
+            self.lbl_page.setStyleSheet("color:#3a3a5e; font-size:12px;")
+        else:
+            self._filter_panel.setStyleSheet("#filterPanel { background:#1a1a2e; }")
+            self._info_bar.setStyleSheet(
+                "background:#1e1e2e; border-bottom:1px solid #26263a;")
+            self.lbl_rows.setStyleSheet("color:#6c7086; font-size:12px;")
+            self.lbl_modified.setStyleSheet(
+                "color:#a6e3a1; font-size:12px; font-weight:600;")
+            self.btn_cancel_changes.setStyleSheet(
+                "QPushButton{background:#3a1a1a;color:#f38ba8;border:1px solid #f38ba8;"
+                "border-radius:6px;font-size:12px;font-weight:700;}"
+                "QPushButton:hover{background:#5a2020;}")
+            self._pagination_bar.setStyleSheet(
+                "background:#181825; border-top:1px solid #313244;")
+            self.lbl_page.setStyleSheet("color:#a6adc8; font-size:12px;")
 
     # ─── Layout inicial correto após exibição ─────────────────────────────────
 
@@ -907,8 +1003,17 @@ class DataPanel(QWidget):
 
     def _on_column_header_clicked(self, logical_index: int):
         """Seleciona toda a coluna ao clicar no cabeçalho — habilita edição em lote."""
-        self.table_view.selectColumn(logical_index)
-        # Registra a coluna selecionada via header para o menu de contexto
+        model = self.table_view.model()
+        if not model or model.rowCount() == 0:
+            return
+        # Seleciona todas as linhas da coluna usando SelectionFlag.Rows para
+        # compatibilidade com SelectionBehavior.SelectRows (linhas inteiras destacadas)
+        top = model.index(0, logical_index)
+        bottom = model.index(model.rowCount() - 1, logical_index)
+        self.table_view.selectionModel().select(
+            QItemSelection(top, bottom),
+            _QISModel.SelectionFlag.ClearAndSelect | _QISModel.SelectionFlag.Rows
+        )
         self._last_header_col = logical_index
 
     def _show_table_context_menu(self, pos):

@@ -638,6 +638,9 @@ class MainWindow(QMainWindow):
         from ui.styles import get_style
         theme = self.cfg.get_value("ui", "theme", "dark")
         self.setStyleSheet(get_style(theme))
+        # Propaga para painéis com inline styles tema-dependentes
+        if hasattr(self, 'data_panel'):
+            self.data_panel.apply_theme(theme)
 
     def _update_ui_state(self):
         has_table = self._current_table is not None

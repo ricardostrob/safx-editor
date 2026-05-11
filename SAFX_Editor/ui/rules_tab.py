@@ -1153,15 +1153,37 @@ class RulesTab(QWidget):
         # Monta debug: mostra valores reais dos campos das condições
         debug_lines = []
         if not matches and conditions:
-            debug_lines.append("⚠  Nenhum registro correspondeu. Valores reais nos primeiros registros:")
-            cond_fields = [c.get("field","") for c in conditions]
-            for row in (non_matches_sample or []):
-                parts = [f"  {f}='{row.get(f,'')}'" for f in cond_fields if f]
-                debug_lines.append("  " + " | ".join(parts))
-            debug_lines.append("")
-            debug_lines.append("Condições configuradas:")
+            debug_lines.append("⚠  Nenhum registro correspondeu.\n")
+            debug_lines.append("── Condições configuradas ──")
             for c in conditions:
-                debug_lines.append(f"  {c.get('field','')} {c.get('op','')} '{c.get('value','')}'")
+                debug_lines.append(
+                    f"  Campo: {c.get('field','')}  |  Operador: {c.get('op','')}  |  "
+                    f"Valor buscado: '{c.get('value','')}'")
+            debug_lines.append("")
+            debug_lines.append("── Valores reais nos primeiros registros ──")
+            cond_fields = [c.get("field","") for c in conditions if c.get("field")]
+            for row in (non_matches_sample or []):
+                parts = [f"{f}='{row.get(f,'')}'" for f in cond_fields]
+                debug_lines.append("  " + "  |  ".join(parts))
+            # Sugere campos que contêm o valor procurado
+            debug_lines.append("")
+            debug_lines.append("── Dica: campos que contêm os valores buscados ──")
+            for cond in conditions:
+                sought = str(cond.get("value", "")).strip()
+                fname = cond.get("field", "")
+                if sought and non_matches_sample:
+                    found_in = []
+                    for row in non_matches_sample[:1]:
+                        for k, v in row.items():
+                            if str(v).strip().lower() == sought.lower():
+                                found_in.append(k)
+                    if found_in:
+                        debug_lines.append(
+                            f"  ✔ Valor '{sought}' encontrado no(s) campo(s): "
+                            f"{', '.join(found_in)}")
+                    else:
+                        debug_lines.append(
+                            f"  ✗ Valor '{sought}' (campo '{fname}') não encontrado em nenhum campo do registro")
 
         dlg = PreviewDialog(matches[:20], rule, self._columns, self,
                             debug_info="\n".join(debug_lines))
