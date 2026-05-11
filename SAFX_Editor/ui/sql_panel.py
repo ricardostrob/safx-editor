@@ -342,6 +342,9 @@ class ResultsTable(QTableWidget):
         self.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive)
         self.horizontalHeader().setStretchLastSection(True)
+        # Permite arrastar colunas para reorganizar análises
+        self.horizontalHeader().setSectionsMovable(True)
+        self.horizontalHeader().setDragEnabled(True)
         # Edição com um único clique em célula já selecionada
         self.setEditTriggers(
             self.EditTrigger.SelectedClicked |

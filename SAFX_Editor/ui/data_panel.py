@@ -15,29 +15,12 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableView,
                               QSplitter, QMenu)
 
 from core.database import SAFXDatabase, ROW_ID_COL
-from core.config import AppConfig
 from core.layout_manager import TableLayout
 from ui.styles import CELL_MODIFIED_BG, CELL_MODIFIED_FG, CELL_KEY_BG, CELL_KEY_FG
 
 logger = logging.getLogger(__name__)
 
-class _DataTableView(QTableView):
-    """Grade com suporte a colagem em massa (Ctrl+V) na coluna ou na seleção."""
-
-    def __init__(self, panel: "DataPanel"):
-        super().__init__(panel)
-        self._panel = panel
-
-    def keyPressEvent(self, event):
-        if event.matches(QKeySequence.StandardKey.Copy):
-            self._panel.copy_selected(include_headers=False)
-            event.accept()
-            return
-        if event.matches(QKeySequence.StandardKey.Paste):
-            if self._panel._paste_from_clipboard():
-                event.accept()
-                return
-        super().keyPressEvent(event)
+PAGE_SIZE = 1000
 
 
 class SAFXTableModel(QAbstractTableModel):
@@ -310,7 +293,6 @@ class FilterBar(QWidget):
         # Linha 2: resumo dos filtros ativos
         # ══════════════════════════════════════════════
         toolbar = QWidget()
-        self._toolbar_widget = toolbar          # ref para refresh_theme
         toolbar.setStyleSheet("background:#181825; border-bottom:1px solid #313244;")
         tb_outer = QVBoxLayout(toolbar)
         tb_outer.setContentsMargins(8, 4, 8, 4)
@@ -384,7 +366,6 @@ class FilterBar(QWidget):
         )
 
         self._rows_container = QWidget()
-        self._rows_container.setObjectName("filterRowsContainer")
         self._rows_container.setStyleSheet("background:#1a1a2e;")
         self._rows_layout = QVBoxLayout(self._rows_container)
         self._rows_layout.setContentsMargins(8, 6, 8, 6)
@@ -449,39 +430,12 @@ class FilterBar(QWidget):
             text = f"✔ {len(active)} filtro(s) ativo(s):  " + "   AND   ".join(parts)
             self.lbl_active.setText(text)
             self.lbl_active.setStyleSheet(
-                "font-size:11px; font-weight:600; font-style:normal;")
+                "color:#89b4fa; font-size:11px; font-weight:600; font-style:normal;")
         else:
             self.lbl_active.setText(
                 "Nenhum filtro ativo — clique em '+ Adicionar Filtro' para começar")
             self.lbl_active.setStyleSheet(
-                "font-size:11px; font-style:italic;")
-
-    def refresh_theme(self, theme: str):
-        """Atualiza os estilos hardcoded da barra de filtros com o tema atual."""
-        dark = theme != 'light'
-        if dark:
-            tb_bg      = "#181825"; tb_bd = "#313244"
-            sc_bg      = "#1a1a2e"; sc_sb = "#13131f"; sc_h = "#45475a"
-            btn_add_bg = "#313244"; btn_add_tx = "#cdd6f4"; btn_add_hv = "#45475a"
-        else:
-            tb_bg      = "#dde1ea"; tb_bd = "#c0c5d4"
-            sc_bg      = "#f0f2f5"; sc_sb = "#e0e4ec"; sc_h = "#a8afc4"
-            btn_add_bg = "#e2e6f0"; btn_add_tx = "#2a2d3e"; btn_add_hv = "#cdd2e2"
-
-        self._toolbar_widget.setStyleSheet(
-            f"background:{tb_bg}; border-bottom:1px solid {tb_bd};")
-        self._scroll.setStyleSheet(
-            f"QScrollArea {{ background:{sc_bg}; border:none; }}"
-            f"QScrollBar:vertical {{ width:8px; background:{sc_sb}; }}"
-            f"QScrollBar::handle:vertical {{ background:{sc_h}; border-radius:4px; }}")
-        self._rows_container.setStyleSheet(f"background:{sc_bg};")
-
-        if hasattr(self, 'btn_add'):
-            self.btn_add.setStyleSheet(
-                f"QPushButton{{background:{btn_add_bg};color:{btn_add_tx};border:none;"
-                f"border-radius:5px;font-size:12px;font-weight:600;padding:0 8px;}}"
-                f"QPushButton:hover{{background:{btn_add_hv};color:{'white' if dark else '#000'}}}")
-        self._update_label()
+                "color:#6c7086; font-size:11px; font-style:italic;")
 
     def clear_all(self):
         while len(self._rows) > 1:
@@ -546,7 +500,6 @@ class DataPanel(QWidget):
         # ── Painel de Filtros ──
         filter_panel = QWidget()
         filter_panel.setObjectName("filterPanel")
-        self._filter_panel_widget = filter_panel    # ref para refresh_theme
         filter_panel.setStyleSheet("#filterPanel { background:#1a1a2e; }")
         fp_layout = QVBoxLayout(filter_panel)
         fp_layout.setContentsMargins(0, 0, 0, 0)
@@ -567,7 +520,6 @@ class DataPanel(QWidget):
 
         # ── Info bar com botão Commit grande ──
         info_bar = QWidget()
-        self._info_bar_widget = info_bar           # ref para refresh_theme
         info_bar.setFixedHeight(44)
         info_bar.setStyleSheet("background:#1e1e2e; border-bottom:1px solid #26263a;")
         info_layout = QHBoxLayout(info_bar)
@@ -577,16 +529,6 @@ class DataPanel(QWidget):
         self.lbl_rows = QLabel("Nenhuma tabela carregada")
         self.lbl_rows.setStyleSheet("color:#6c7086; font-size:12px;")
         info_layout.addWidget(self.lbl_rows)
-
-        self.btn_copy_selection = QPushButton("📋  Copiar seleção")
-        self.btn_copy_selection.setFixedHeight(30)
-        self.btn_copy_selection.setToolTip(
-            "Copia as células selecionadas como texto TSV (tabulação).\n"
-            "Use linhas, colunas ou bloco; depois Ctrl+V para colar na mesma forma na seleção.\n"
-            "Atalho: Ctrl+C")
-        self.btn_copy_selection.clicked.connect(
-            lambda: self.copy_selected(include_headers=False))
-        info_layout.addWidget(self.btn_copy_selection)
 
         info_layout.addStretch()
 
@@ -631,41 +573,22 @@ class DataPanel(QWidget):
         self.btn_cancel_changes.clicked.connect(self._cancel_changes)
         info_layout.addWidget(self.btn_cancel_changes)
 
-        self.btn_undo_last = QPushButton("↩ Desfazer último lote")
-        self.btn_undo_last.setFixedHeight(34)
-        self.btn_undo_last.setMinimumWidth(170)
-        self.btn_undo_last.setToolTip(
-            "Restaura no SQLite os valores anteriores ao último "
-            "«Confirmar Alterações», colar em massa na coluna ou edição em lote.")
-        self.btn_undo_last.setStyleSheet(
-            "QPushButton{background:#313244;color:#cdd6f4;border:1px solid #45475a;"
-            "border-radius:6px;font-size:12px;font-weight:700;}"
-            "QPushButton:hover{background:#45475a;}"
-            "QPushButton:disabled{background:#1e1e2e;color:#6c7086;border-color:#313244;}")
-        self.btn_undo_last.clicked.connect(self.undo_last_batch)
-        info_layout.addWidget(self.btn_undo_last)
-        self._update_undo_button_state()
-
         dp_layout.addWidget(info_bar)
 
         # ── Tabela ──
-        self.table_view = _DataTableView(self)
+        self.table_view = QTableView()
         self.table_view.setAlternatingRowColors(True)
-        # SelectItems: clique no cabeçalho da coluna seleciona a coluna inteira (edição em massa);
-        # clique no cabeçalho da linha seleciona a linha inteira.
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_view.setSortingEnabled(False)
         self.table_view.verticalHeader().setDefaultSectionSize(30)  # linhas mais altas
         self.table_view.verticalHeader().setVisible(True)
-        self.table_view.verticalHeader().sectionClicked.connect(self._on_data_row_header_clicked)
         self.table_view.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive)
         self.table_view.horizontalHeader().setStretchLastSection(False)
-        self.table_view.horizontalHeader().sectionClicked.connect(
-            self._on_data_column_header_clicked)
-        self.table_view.horizontalHeader().setToolTip(
-            "Clique no nome da coluna para selecionar toda a coluna (Ctrl+C / menu: editar em lote).")
+        # Permite arrastar colunas para reorganizar — mantém todas as colunas visíveis
+        self.table_view.horizontalHeader().setSectionsMovable(True)
+        self.table_view.horizontalHeader().setDragEnabled(True)
         self.table_view.setShowGrid(True)
         self.table_view.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked |
@@ -700,7 +623,6 @@ class DataPanel(QWidget):
 
         # ── Paginação ──
         pagination = QWidget()
-        self._pagination_widget = pagination       # ref para refresh_theme
         pagination.setFixedHeight(38)
         pagination.setStyleSheet("background:#181825; border-top:1px solid #313244;")
         pag_layout = QHBoxLayout(pagination)
@@ -730,77 +652,13 @@ class DataPanel(QWidget):
         pag_layout.addWidget(lbl_page_size)
 
         self.combo_page_size = QComboBox()
-        self.combo_page_size.addItems(["500", "1000", "2000", "5000", "Tudo"])
+        self.combo_page_size.addItems(["500", "1000", "2000", "5000"])
         self.combo_page_size.setCurrentText("1000")
         self.combo_page_size.setFixedWidth(80)
         self.combo_page_size.currentTextChanged.connect(self._on_page_size_changed)
         pag_layout.addWidget(self.combo_page_size)
 
         main_layout.addWidget(pagination)
-
-    # ─── Tema ─────────────────────────────────────────────────────────────────
-
-    def refresh_theme(self, theme: str):
-        """Atualiza todos os estilos hardcoded do painel conforme o tema."""
-        dark = theme != 'light'
-        if dark:
-            bar_bg    = "#181825"
-            bar_bd    = "#313244"
-            fp_bg     = "#1a1a2e"
-            info_bg   = "#1e1e2e"
-            info_bd   = "#26263a"
-            spl_bg    = "#26263a"
-            spl_bd    = "#45475a"
-            spl_hv    = "#1e3a5a"
-            spl_hv_bd = "#89b4fa"
-            spl_pr    = "#2a4a6a"
-        else:
-            bar_bg    = "#dde1ea"; bar_bd = "#c0c5d4"
-            fp_bg     = "#f0f2f5"
-            info_bg   = "#e8eaf2"; info_bd = "#c0c5d4"
-            spl_bg    = "#d0d4e0"; spl_bd = "#b0b8cc"
-            spl_hv    = "#c0d4f0"; spl_hv_bd = "#4a80c0"
-            spl_pr    = "#a8c4e8"
-
-        if hasattr(self, '_info_bar_widget'):
-            self._info_bar_widget.setStyleSheet(
-                f"background:{info_bg}; border-bottom:1px solid {info_bd};")
-        if hasattr(self, '_filter_panel_widget'):
-            self._filter_panel_widget.setStyleSheet(
-                f"#filterPanel {{ background:{fp_bg}; }}")
-        if hasattr(self, '_pagination_widget'):
-            self._pagination_widget.setStyleSheet(
-                f"background:{bar_bg}; border-top:1px solid {bar_bd};")
-        if hasattr(self, 'filter_splitter'):
-            self.filter_splitter.setStyleSheet(
-                f"QSplitter::handle:vertical {{ background:{spl_bg};"
-                f"  border-top:1px solid {spl_bd}; border-bottom:1px solid {spl_bd}; }}"
-                f"QSplitter::handle:vertical:hover {{ background:{spl_hv};"
-                f"  border-top:1px solid {spl_hv_bd}; border-bottom:1px solid {spl_hv_bd}; }}"
-                f"QSplitter::handle:vertical:pressed {{ background:{spl_pr}; }}")
-        if hasattr(self, 'filter_bar'):
-            self.filter_bar.refresh_theme(theme)
-
-        # Labels de contagem / status
-        if hasattr(self, 'lbl_rows'):
-            self.lbl_rows.setStyleSheet(
-                f"color:{'#6c7086' if dark else '#555a6e'}; font-size:12px;")
-        if hasattr(self, 'lbl_page'):
-            self.lbl_page.setStyleSheet(
-                f"color:{'#a6adc8' if dark else '#555a6e'}; font-size:12px;")
-        if hasattr(self, 'btn_copy_selection'):
-            if dark:
-                self.btn_copy_selection.setStyleSheet(
-                    "QPushButton{background:#313244;color:#cdd6f4;border:1px solid #45475a;"
-                    "border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;}"
-                    "QPushButton:hover{background:#45475a;}"
-                    "QPushButton:pressed{padding-top:2px;}")
-            else:
-                self.btn_copy_selection.setStyleSheet(
-                    "QPushButton{background:#e2e6f0;color:#1a1a2e;border:1px solid #b8bcd0;"
-                    "border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;}"
-                    "QPushButton:hover{background:#d0d8e8;}"
-                    "QPushButton:pressed{padding-top:2px;}")
 
     # ─── Layout inicial correto após exibição ─────────────────────────────────
 
@@ -841,40 +699,20 @@ class DataPanel(QWidget):
             self.filter_bar.set_columns(cols)
 
         self._refresh_data()
-        self._update_undo_button_state()
-
-    def _effective_page_limit(self) -> Optional[int]:
-        """None = carregar todas as linhas do filtro (sem LIMIT)."""
-        t = (self.combo_page_size.currentText() or "").strip().lower()
-        if t in ("tudo", "todas", "all"):
-            return None
-        try:
-            n = int(t)
-            return n if n > 0 else None
-        except ValueError:
-            return None
 
     def _refresh_data(self):
         if not self._table_name:
             return
 
-        page_limit = self._effective_page_limit()
-        if page_limit is None:
-            offset = 0
-            columns, rows = self.db.get_table_data(
-                self._table_name,
-                filters=self._active_filters,
-                limit=None,
-                offset=0,
-            )
-        else:
-            offset = self._current_page * page_limit
-            columns, rows = self.db.get_table_data(
-                self._table_name,
-                filters=self._active_filters,
-                limit=page_limit,
-                offset=offset,
-            )
+        page_size = int(self.combo_page_size.currentText())
+        offset = self._current_page * page_size
+
+        columns, rows = self.db.get_table_data(
+            self._table_name,
+            filters=self._active_filters,
+            limit=page_size,
+            offset=offset
+        )
         self._total_rows = self.db.count_rows(self._table_name, self._active_filters)
 
         self.model.load_data(columns, rows, self._layout, self._key_fields)
@@ -889,25 +727,16 @@ class DataPanel(QWidget):
         self._update_pagination()
 
     def _update_info(self):
-        page_limit = self._effective_page_limit()
+        page_size = int(self.combo_page_size.currentText())
+        start = self._current_page * page_size + 1
+        end = min(start + page_size - 1, self._total_rows)
         filter_info = f' | {len(self._active_filters)} filtro(s)' if self._active_filters else ''
-        if page_limit is None:
-            self.lbl_rows.setText(
-                f'{self._total_rows:,} registro(s){filter_info} — exibindo todos ({self._total_rows:,})')
-        else:
-            start = self._current_page * page_limit + 1
-            end = min(start + page_limit - 1, self._total_rows)
-            self.lbl_rows.setText(
-                f'{self._total_rows:,} registro(s){filter_info} — exibindo {start:,}–{end:,}')
+        self.lbl_rows.setText(
+            f'{self._total_rows:,} registro(s){filter_info} — exibindo {start:,}–{end:,}')
 
     def _update_pagination(self):
-        page_limit = self._effective_page_limit()
-        if page_limit is None:
-            self.lbl_page.setText("Todas as linhas (sem paginação)")
-            self.btn_prev.setEnabled(False)
-            self.btn_next.setEnabled(False)
-            return
-        total_pages = max(1, (self._total_rows + page_limit - 1) // page_limit)
+        page_size = int(self.combo_page_size.currentText())
+        total_pages = max(1, (self._total_rows + page_size - 1) // page_size)
         self.lbl_page.setText(f'Pág. {self._current_page + 1} / {total_pages}')
         self.btn_prev.setEnabled(self._current_page > 0)
         self.btn_next.setEnabled(self._current_page < total_pages - 1)
@@ -918,36 +747,20 @@ class DataPanel(QWidget):
             self._refresh_data()
 
     def _next_page(self):
-        page_limit = self._effective_page_limit()
-        if page_limit is None:
-            return
-        total_pages = max(1, (self._total_rows + page_limit - 1) // page_limit)
+        page_size = int(self.combo_page_size.currentText())
+        total_pages = max(1, (self._total_rows + page_size - 1) // page_size)
         if self._current_page < total_pages - 1:
             self._current_page += 1
             self._refresh_data()
 
     def _on_page_size_changed(self):
         self._current_page = 0
-        AppConfig.get().set_value("ui", "data_page_size", self.combo_page_size.currentText())
         self._refresh_data()
 
     def _on_filter_changed(self, filters: Dict[str, str]):
         self._active_filters = filters
         self._current_page = 0
         self._refresh_data()
-
-    def _on_data_column_header_clicked(self, logical_index: int):
-        """Seleciona todas as células da coluna (exceto _row_id) para colar / edição em lote."""
-        if logical_index < 0 or logical_index >= len(self.model._columns):
-            return
-        if self.model._columns[logical_index] == ROW_ID_COL:
-            return
-        self.table_view.clearSelection()
-        self.table_view.selectColumn(logical_index)
-
-    def _on_data_row_header_clicked(self, logical_index: int):
-        self.table_view.clearSelection()
-        self.table_view.selectRow(logical_index)
 
     def _on_cell_changed(self, row_id: int, field: str, old_val: str, new_val: str):
         # Atualiza banco imediatamente
@@ -1020,38 +833,7 @@ class DataPanel(QWidget):
         QTimer.singleShot(3000, lambda: self.lbl_modified.setText(''))
 
         if committed:
-            self.db.record_undo_batch(committed)
             self.changeCommitted.emit(committed)
-
-        self._update_undo_button_state()
-
-    def _update_undo_button_state(self):
-        if hasattr(self, 'btn_undo_last') and self.db is not None:
-            self.btn_undo_last.setEnabled(self.db.can_undo())
-
-    def undo_last_batch(self):
-        """Desfaz o último lote confirmado (ou colar em massa) no SQLite."""
-        if not self.db or not self.db.can_undo():
-            QMessageBox.information(
-                self, "Desfazer",
-                "Não há lote anterior para desfazer.\n"
-                "Cada «Confirmar Alterações» ou colar em massa na coluna gera um lote.")
-            return
-        reply = QMessageBox.question(
-            self, "Desfazer último lote",
-            "Restaurar no banco os valores anteriores ao último lote de edições?\n\n"
-            "Afeta apenas o SQLite em memória (mesma sessão).",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        ok, msg = self.db.undo_last_batch()
-        self._refresh_data()
-        self._update_undo_button_state()
-        if ok:
-            QMessageBox.information(self, "Desfazer", msg)
-        else:
-            QMessageBox.warning(self, "Desfazer", msg)
 
     def _cancel_changes(self):
         reply = QMessageBox.question(
@@ -1086,10 +868,7 @@ class DataPanel(QWidget):
             return []
         where_parts, params = self.db._build_where(self._active_filters)
         where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-        sql = (
-            f'SELECT "{ROW_ID_COL}" FROM "{self._table_name}" {where_sql} '
-            f'ORDER BY "{ROW_ID_COL}"'
-        )
+        sql = f'SELECT "{ROW_ID_COL}" FROM "{self._table_name}" {where_sql}'
         with self.db._lock:
             cur = self.db.conn.cursor()
             cur.execute(sql, list(params))
@@ -1104,206 +883,20 @@ class DataPanel(QWidget):
     def refresh(self):
         self._refresh_data()
 
-    def copy_selected(self, include_headers: bool = False) -> int:
-        """
-        Copia células selecionadas como TSV (separador TAB, linhas com \\n).
-        Só inclui células realmente selecionadas (não preenche retângulo com vazios).
-        Com ``include_headers=True``, adiciona linha inicial com nomes das colunas
-        (mesma ordem de colunas da seleção) e alinha valores às colunas escolhidas.
-        """
+    def copy_selected(self):
         indexes = self.table_view.selectedIndexes()
         if not indexes:
-            QMessageBox.information(
-                self, "Copiar seleção",
-                "Selecione células na grade (uma célula, linha, coluna ou bloco).\n"
-                "Depois use Colar (Ctrl+V) para aplicar valores só na área selecionada.")
-            return 0
-
-        sel = {(ix.row(), ix.column()) for ix in indexes}
-        rows_sorted = sorted({ix.row() for ix in indexes})
-        all_cols = sorted({ix.column() for ix in indexes})
-
-        lines: List[str] = []
-        if include_headers:
-            hdr = '\t'.join(
-                self.model._columns[c] if 0 <= c < len(self.model._columns) else ''
-                for c in all_cols)
-            lines.append(hdr)
-
-        for r in rows_sorted:
-            cols_in_row = sorted(cc for (rr, cc) in sel if rr == r)
-            if not cols_in_row:
-                continue
-            if include_headers:
-                parts = []
-                for c in all_cols:
-                    if (r, c) in sel:
-                        parts.append(
-                            str(self.model.data(self.model.index(r, c)) or ''))
-                    else:
-                        parts.append('')
-                lines.append('\t'.join(parts))
-            else:
-                parts = [
-                    str(self.model.data(self.model.index(r, c)) or '')
-                    for c in cols_in_row]
-                lines.append('\t'.join(parts))
-
-        QApplication.clipboard().setText('\n'.join(lines))
-        n = len(indexes)
-        win = self.window()
-        sb = getattr(win, 'status_bar', None)
-        if sb is not None:
-            tip = f"{n} célula(s) copiadas (TSV)"
-            if include_headers:
-                tip += " com cabeçalhos"
-            sb.showMessage(tip + ".", 2500)
-        return n
-
-    def _paste_from_clipboard(self) -> bool:
-        """Cola texto do clipboard na coluna atual / seleção (uma coluna ou bloco TAB)."""
-        if not self._table_name:
-            return False
-        text = QApplication.clipboard().text()
-        if not text:
-            return False
-        lines = [ln.rstrip('\r') for ln in text.splitlines()]
-        while lines and lines[-1] == '':
-            lines.pop()
-        if not lines:
-            return True
-
-        indexes = self.table_view.selectedIndexes()
-        if not indexes:
-            cur = self.table_view.currentIndex()
-            if not cur.isValid():
-                return False
-            indexes = [cur]
-
+            return
+        rows = sorted({i.row() for i in indexes})
         cols = sorted({i.column() for i in indexes})
-        rows_by_col = {c: sorted({i.row() for i in indexes if i.column() == c}) for c in cols}
-        n_tab_cols = len(lines[0].split('\t'))
-        has_tab_block = (
-            '\t' in lines[0]
-            and n_tab_cols > 1
-            and all(len(l.split('\t')) == n_tab_cols for l in lines)
-        )
-
-        # Colagem em bloco (várias colunas com TAB)
-        if has_tab_block and len(cols) >= n_tab_cols:
-            min_r = min(i.row() for i in indexes)
-            min_c = min(cols)
-            for ri, line in enumerate(lines):
-                parts = line.split('\t')
-                for ci, val in enumerate(parts):
-                    r, c = min_r + ri, min_c + ci
-                    if r >= self.model.rowCount() or c >= len(self.model._columns):
-                        break
-                    name = self.model._columns[c]
-                    if name == ROW_ID_COL:
-                        continue
-                    idx = self.model.index(r, c)
-                    self.model.setData(idx, val, Qt.ItemDataRole.EditRole)
-            return True
-
-        # Uma coluna: vários valores em linhas (valor pode conter TAB — usa linha inteira)
-        if len(cols) != 1:
-            QMessageBox.information(
-                self, "Colar",
-                "Para colar vários valores de uma vez, selecione células de uma única coluna\n"
-                "(ou use TAB na mesma linha para várias colunas).")
-            return True
-
-        col = cols[0]
-        col_name = self.model._columns[col]
-        if col_name == ROW_ID_COL:
-            QMessageBox.warning(self, "Colar", "Não é possível colar na coluna de ID interno.")
-            return True
-
-        target_rows = rows_by_col.get(col, [])
-        if not target_rows:
-            return False
-        if len(target_rows) == 1:
-            r0 = target_rows[0]
-            for i, val in enumerate(lines):
-                r = r0 + i
-                if r >= self.model.rowCount():
-                    break
-                idx = self.model.index(r, col)
-                self.model.setData(idx, val, Qt.ItemDataRole.EditRole)
-        else:
-            for i, r in enumerate(target_rows):
-                if i >= len(lines):
-                    break
-                idx = self.model.index(r, col)
-                self.model.setData(idx, lines[i], Qt.ItemDataRole.EditRole)
-        return True
-
-    def _paste_column_all_filtered(self, col_name: str):
-        """Cola N linhas do clipboard nos primeiros N registros que passam pelo filtro atual."""
-        if not self._table_name or col_name == ROW_ID_COL:
-            return
-        text = QApplication.clipboard().text()
-        if not text.strip():
-            return
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        if not lines:
-            return
-        row_ids = self.get_all_filtered_row_ids()
-        if not row_ids:
-            QMessageBox.information(self, "Colar", "Nenhum registro corresponde ao filtro atual.")
-            return
-        n_apply = min(len(lines), len(row_ids))
-        if len(lines) > len(row_ids):
-            QMessageBox.warning(
-                self, "Colar",
-                f"A área filtrada tem {len(row_ids):,} linha(s), mas o clipboard tem "
-                f"{len(lines):,} valor(es).\nSerão aplicados apenas os primeiros {n_apply:,}.")
-        elif len(lines) < len(row_ids):
-            reply = QMessageBox.question(
-                self, "Colar em massa (filtrado)",
-                f"O filtro retorna {len(row_ids):,} linha(s), mas o clipboard tem "
-                f"{len(lines):,} valor(es).\n"
-                f"Serão alteradas apenas as primeiras {n_apply:,} linhas (por ordem de ID).\n"
-                "Continuar?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
-        committed = []
-        for i in range(n_apply):
-            rid = row_ids[i]
-            nv = lines[i]
-            with self.db._lock:
-                cur = self.db.conn.cursor()
-                cur.execute(
-                    f'SELECT "{col_name}" FROM "{self._table_name}" '
-                    f'WHERE "{ROW_ID_COL}" = ?',
-                    (rid,))
-                row = cur.fetchone()
-            ov = str(row[0]) if row and row[0] is not None else ''
-            if ov == nv:
-                continue
-            self.db.update_cell(self._table_name, rid, col_name, nv)
-            self.db.add_to_change_log(
-                self._table_name, rid, col_name, ov, nv, 'bulk_paste')
-            committed.append({
-                'table': self._table_name,
-                'row_id': rid,
-                'field': col_name,
-                'old_value': ov,
-                'new_value': nv,
-            })
-
-        self._refresh_data()
-        if committed:
-            self.db.record_undo_batch(committed)
-            self.changeCommitted.emit(committed)
-            self._update_undo_button_state()
-        QMessageBox.information(
-            self, "Colar",
-            f"{len(committed):,} valor(es) aplicados na coluna '{col_name}' "
-            f"(registros filtrados, em ordem).")
+        lines = []
+        for r in rows:
+            cells = []
+            for c in cols:
+                idx = self.model.index(r, c)
+                cells.append(str(self.model.data(idx) or ''))
+            lines.append('\t'.join(cells))
+        QApplication.clipboard().setText('\n'.join(lines))
 
     # ─── Menu de contexto e Edição em Lote ───────────────────────────────────
 
@@ -1324,33 +917,18 @@ class DataPanel(QWidget):
             "QMenu::item:selected{background:#89b4fa;color:#1e1e2e;}"
             "QMenu::separator{height:1px;background:#45475a;margin:4px 8px;}")
 
-        # Edição em lote — uma coluna e várias linhas (inclui seleção da coluna inteira pelo cabeçalho)
+        # Edição em lote — só se há seleção e coluna válida
         if n > 0 and idx.isValid():
-            cols_in_sel = {i.column() for i in self.table_view.selectedIndexes()}
             col_name = self.model._columns[idx.column()] if idx.column() < len(self.model._columns) else ''
-            if col_name and col_name != ROW_ID_COL and len(cols_in_sel) == 1:
-                act_bulk = menu.addAction(
-                    f"✎  Editar em lote — {n} linha(s) no campo '{col_name}'")
+            if col_name and col_name != ROW_ID_COL:
+                act_bulk = menu.addAction(f"✎  Editar em lote — {n} linha(s) no campo '{col_name}'")
                 act_bulk.triggered.connect(
-                    lambda cn=col_name, rows=list(selected_rows): self._open_bulk_edit(cn, rows))
+                    lambda: self._open_bulk_edit(col_name, selected_rows))
                 menu.addSeparator()
 
-        # Copiar / Colar
-        act_copy = menu.addAction("📋  Copiar células selecionadas (Ctrl+C)")
-        act_copy.triggered.connect(lambda: self.copy_selected(include_headers=False))
-        act_copy_hdr = menu.addAction("📋  Copiar com cabeçalhos (nomes das colunas)")
-        act_copy_hdr.triggered.connect(lambda: self.copy_selected(include_headers=True))
-        act_paste = menu.addAction("📥  Colar (Ctrl+V) — coluna / seleção")
-        act_paste.triggered.connect(self._paste_from_clipboard)
-
-        if n > 0 and idx.isValid():
-            cols_in_sel = {i.column() for i in self.table_view.selectedIndexes()}
-            col_name = self.model._columns[idx.column()] if idx.column() < len(self.model._columns) else ''
-            if col_name and col_name != ROW_ID_COL and len(cols_in_sel) == 1:
-                act_paste_all = menu.addAction(
-                    f"📥  Colar na coluna '{col_name}' (todos os filtrados, ordem ID)")
-                act_paste_all.triggered.connect(
-                    lambda cn=col_name: self._paste_column_all_filtered(cn))
+        # Copiar
+        act_copy = menu.addAction("📋  Copiar células selecionadas")
+        act_copy.triggered.connect(self.copy_selected)
 
         # Selecionar tudo
         act_all = menu.addAction("Selecionar tudo (página atual)")

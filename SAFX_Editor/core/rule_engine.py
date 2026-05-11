@@ -43,14 +43,15 @@ CONDITION_OPS: Dict[str, str] = {
 }
 
 ACTION_TYPES: Dict[str, str] = {
-    "set_value":   "Definir valor constante",
-    "set_formula": "Calcular por fórmula  (ex: {PRECO}*{QTDE})",
-    "copy_field":  "Copiar de outro campo",
-    "format":      "Formatar campo",
-    "lookup":      "Substituir por mapeamento  (chave=valor, separado por ;)",
-    "api_fetch":   "Buscar de API externa",
-    "concat":      "Concatenar campos  (ex: {NOME} + ' ' + {SOBRENOME})",
-    "conditional": "Valor condicional  (se {CAMPO}>0 então 'OK' senão 'ERRO')",
+    "set_value":    "Definir valor constante",
+    "set_formula":  "Fórmula matemática  (ex: {PRECO}*{QTDE})",
+    "copy_field":   "Copiar de outro campo",
+    "format":       "Formatar campo",
+    "lookup":       "Substituir por mapeamento  (chave=valor; ...)",
+    "table_lookup": "Buscar de outra tabela  (join/filtro)",
+    "api_fetch":    "Buscar de API externa",
+    "concat":       "Concatenar campos  (ex: {NOME}+' '+{SOBRENOME})",
+    "conditional":  "Valor condicional  (se → então → senão)",
 }
 
 FORMAT_TYPES: Dict[str, str] = {
@@ -393,7 +394,7 @@ class RuleEngine:
                 if not field or field not in cols:
                     continue
                 try:
-                    new_val = self._apply_action(atype, action, field, row, errors)
+                    new_val = self._apply_action(atype, action, field, row, errors, db)
                     if new_val is not None:
                         updates[field] = new_val
                         row[field] = new_val  # cascata dentro da mesma regra
@@ -417,7 +418,8 @@ class RuleEngine:
         return modified, errors
 
     def _apply_action(self, atype: str, action: Dict,
-                      field: str, row: Dict, errors: List[str]) -> Optional[str]:
+                      field: str, row: Dict, errors: List[str],
+                      db=None) -> Optional[str]:
         """Aplica uma ação individual e retorna o novo valor (string) ou None."""
 
         if atype == "set_value":
@@ -459,10 +461,66 @@ class RuleEngine:
             result = eval_formula(formula, row)
             return then_val if result else else_val
 
+        if atype == "table_lookup":
+            return self._table_lookup_action(action, row, db, errors)
+
         if atype == "api_fetch":
             return self._api_action(action, row, errors)
 
         return None
+
+    def _table_lookup_action(self, action: Dict, row: Dict,
+                             db, errors: List[str]) -> Optional[str]:
+        """Busca um valor em outra tabela usando um campo da linha atual como chave."""
+        if db is None:
+            errors.append("table_lookup: banco de dados não disponível")
+            return None
+        src_table = action.get("src_table", "")
+        src_match = action.get("src_match_field", "")
+        local_match = action.get("local_match_field", "")
+        return_field = action.get("return_field", "")
+        default_val = str(action.get("default_value", ""))
+        match_op = action.get("match_op", "equals")
+
+        if not src_table or not return_field:
+            return None
+
+        local_val = str(row.get(local_match, "")) if local_match else ""
+
+        try:
+            with db._lock:
+                cur = db.conn.cursor()
+                if src_match and local_val:
+                    if match_op == "equals":
+                        cur.execute(
+                            f'SELECT "{return_field}" FROM "{src_table}" '
+                            f'WHERE "{src_match}" = ? LIMIT 1',
+                            [local_val])
+                    elif match_op == "contains":
+                        cur.execute(
+                            f'SELECT "{return_field}" FROM "{src_table}" '
+                            f'WHERE "{src_match}" LIKE ? LIMIT 1',
+                            [f"%{local_val}%"])
+                    elif match_op == "starts_with":
+                        cur.execute(
+                            f'SELECT "{return_field}" FROM "{src_table}" '
+                            f'WHERE "{src_match}" LIKE ? LIMIT 1',
+                            [f"{local_val}%"])
+                    else:
+                        cur.execute(
+                            f'SELECT "{return_field}" FROM "{src_table}" '
+                            f'WHERE "{src_match}" = ? LIMIT 1',
+                            [local_val])
+                else:
+                    cur.execute(
+                        f'SELECT "{return_field}" FROM "{src_table}" LIMIT 1')
+                result = cur.fetchone()
+            if result and result[0] is not None:
+                return str(result[0])
+            return default_val
+        except Exception as exc:
+            errors.append(f"table_lookup '{src_table}': {exc}")
+            return default_val
 
     def _api_action(self, action: Dict, row: Dict, errors: List[str]) -> Optional[str]:
         try:

@@ -182,9 +182,10 @@ class ConditionRow(QWidget):
 class ActionRow(QWidget):
     removed = pyqtSignal(object)
 
-    def __init__(self, columns: List[str], parent=None):
+    def __init__(self, columns: List[str], db=None, parent=None):
         super().__init__(parent)
         self._columns = columns
+        self._db = db
         self._build()
 
     def _build(self):
@@ -258,6 +259,9 @@ class ActionRow(QWidget):
             self.w_source = _combo(self._columns)
             self._extra_lay.addWidget(self.w_source)
 
+        elif atype == "table_lookup":
+            self._build_table_lookup_widget()
+
         elif atype == "format":
             self._extra_lay.addWidget(_lbl("Formato:"))
             self.w_fmt = _combo(list(FORMAT_TYPES.values()))
@@ -298,6 +302,85 @@ class ActionRow(QWidget):
 
         self._extra_lay.addStretch()
 
+    def _build_table_lookup_widget(self):
+        """Constrói o widget de busca cross-table dinamicamente."""
+        tables = self._db.get_loaded_tables() if self._db else []
+
+        self._extra_lay.addWidget(_lbl("Tabela:"))
+        self.w_src_table = _combo(tables)
+        self.w_src_table.setMinimumWidth(130)
+        self._extra_lay.addWidget(self.w_src_table)
+
+        self._extra_lay.addWidget(_lbl(" Onde:"))
+        self.w_src_match = _combo()
+        self.w_src_match.setMinimumWidth(120)
+        self._extra_lay.addWidget(self.w_src_match)
+
+        self._extra_lay.addWidget(_lbl("="))
+        self.w_local_match = _combo(self._columns)
+        self.w_local_match.setMinimumWidth(110)
+        self.w_local_match.setToolTip("Campo desta tabela cujo valor é usado como filtro")
+        self._extra_lay.addWidget(self.w_local_match)
+
+        self._extra_lay.addWidget(_lbl(" Retornar:"))
+        self.w_ret_field = _combo()
+        self.w_ret_field.setMinimumWidth(110)
+        self._extra_lay.addWidget(self.w_ret_field)
+
+        self._extra_lay.addWidget(_lbl(" Padrão:"))
+        self.w_default = _line("")
+        self.w_default.setFixedWidth(70)
+        self._extra_lay.addWidget(self.w_default)
+
+        # Quando troca a tabela-fonte, atualiza os combos de campo
+        self.w_src_table.currentTextChanged.connect(self._on_src_table_changed)
+        if tables:
+            self._on_src_table_changed(tables[0])
+
+    def _on_src_table_changed(self, table: str):
+        if not self._db or not table:
+            return
+        cols = self._db.get_table_columns(table)
+        for c in (getattr(self, "w_src_match", None),
+                  getattr(self, "w_ret_field", None)):
+            if c is not None:
+                cur = c.currentText()
+                c.clear()
+                c.addItems(cols)
+                idx = c.findText(cur)
+                if idx >= 0:
+                    c.setCurrentIndex(idx)
+
+    def update_columns(self, columns: List[str]):
+        """Atualiza todos os combos de campo desta linha quando a tabela muda."""
+        self._columns = columns
+        cur = self.combo_field.currentText()
+        self.combo_field.clear()
+        self.combo_field.addItems(columns)
+        idx = self.combo_field.findText(cur)
+        if idx >= 0:
+            self.combo_field.setCurrentIndex(idx)
+
+        # Atualiza combo de cópia de campo
+        w_src = getattr(self, "w_source", None)
+        if w_src is not None:
+            cur_src = w_src.currentText()
+            w_src.clear()
+            w_src.addItems(columns)
+            idx = w_src.findText(cur_src)
+            if idx >= 0:
+                w_src.setCurrentIndex(idx)
+
+        # Atualiza campo local no table_lookup
+        w_lm = getattr(self, "w_local_match", None)
+        if w_lm is not None:
+            cur_lm = w_lm.currentText()
+            w_lm.clear()
+            w_lm.addItems(columns)
+            idx = w_lm.findText(cur_lm)
+            if idx >= 0:
+                w_lm.setCurrentIndex(idx)
+
     def _current_type(self) -> str:
         idx = self.combo_type.currentIndex()
         return list(ACTION_TYPES.keys())[idx]
@@ -313,7 +396,8 @@ class ActionRow(QWidget):
         elif atype in ("set_formula", "concat"):
             d["formula"] = getattr(self, "w_formula", _line()).text()
         elif atype == "copy_field":
-            d["source_field"] = getattr(self, "w_source", _combo()).currentText()
+            src_w = getattr(self, "w_source", None)
+            d["source_field"] = src_w.currentText() if src_w else ""
         elif atype == "format":
             fmt_keys = list(FORMAT_TYPES.keys())
             fidx = getattr(self, "w_fmt", _combo()).currentIndex()
@@ -321,6 +405,13 @@ class ActionRow(QWidget):
             d["format_arg"] = getattr(self, "w_fmt_arg", _line()).text()
         elif atype == "lookup":
             d["mapping_raw"] = getattr(self, "w_mapping", _line()).text()
+        elif atype == "table_lookup":
+            d["src_table"] = getattr(self, "w_src_table", _combo()).currentText()
+            d["src_match_field"] = getattr(self, "w_src_match", _combo()).currentText()
+            d["local_match_field"] = getattr(self, "w_local_match", _combo()).currentText()
+            d["return_field"] = getattr(self, "w_ret_field", _combo()).currentText()
+            d["default_value"] = getattr(self, "w_default", _line()).text()
+            d["match_op"] = "equals"
         elif atype == "conditional":
             d["formula"] = getattr(self, "w_cond_formula", _line()).text()
             d["then_value"] = getattr(self, "w_then", _line()).text()
@@ -683,7 +774,7 @@ class RulesTab(QWidget):
 
     def _on_table_changed(self, table: str):
         self._columns = self.db.get_table_columns(table) if table else []
-        # Atualiza campos nas linhas de condição e ação existentes
+        # Atualiza campos nas linhas de condição
         for cr in self._condition_rows:
             cur = cr.combo_field.currentText()
             cr.combo_field.clear()
@@ -691,13 +782,9 @@ class RulesTab(QWidget):
             idx = cr.combo_field.findText(cur)
             if idx >= 0:
                 cr.combo_field.setCurrentIndex(idx)
+        # Atualiza campos nas linhas de ação (incluindo combos aninhados)
         for ar in self._action_rows:
-            cur = ar.combo_field.currentText()
-            ar.combo_field.clear()
-            ar.combo_field.addItems(self._columns)
-            idx = ar.combo_field.findText(cur)
-            if idx >= 0:
-                ar.combo_field.setCurrentIndex(idx)
+            ar.update_columns(self._columns)
 
     # ── Lista de regras / pacotes ─────────────────────────────────────────────
 
@@ -836,7 +923,7 @@ class RulesTab(QWidget):
     # ── Ações ──────────────────────────────────────────────────────────────────
 
     def _add_action_row(self, data: Optional[Dict] = None) -> ActionRow:
-        row = ActionRow(self._columns, self)
+        row = ActionRow(self._columns, db=self.db, parent=self)
         row.removed.connect(self._remove_action_row)
         self._act_lay.addWidget(row)
         self._action_rows.append(row)
@@ -1012,12 +1099,11 @@ class RulesTab(QWidget):
             self._set_status("Adicione ao menos uma ação para prévia.", error=True)
             return
 
-        from core.rule_engine import evaluate_conditions
-        from core.database import ROW_ID_COL
+        from core.rule_engine import evaluate_conditions, check_condition
         try:
             with self.db._lock:
                 cur = self.db.conn.cursor()
-                cur.execute(f'SELECT * FROM "{table}" LIMIT 200')
+                cur.execute(f'SELECT * FROM "{table}" LIMIT 500')
                 cols = [d[0] for d in cur.description]
                 rows_data = cur.fetchall()
         except Exception as exc:
@@ -1025,14 +1111,31 @@ class RulesTab(QWidget):
             return
 
         matches = []
+        non_matches_sample = []
         conditions = rule.get("conditions", [])
         logic = rule.get("condition_logic", "AND")
         for rt in rows_data:
             row = dict(zip(cols, rt))
             if evaluate_conditions(conditions, logic, row):
                 matches.append(row)
+            elif len(non_matches_sample) < 3:
+                non_matches_sample.append(row)
 
-        dlg = PreviewDialog(matches[:20], rule, self._columns, self)
+        # Monta debug: mostra valores reais dos campos das condições
+        debug_lines = []
+        if not matches and conditions:
+            debug_lines.append("⚠  Nenhum registro correspondeu. Valores reais nos primeiros registros:")
+            cond_fields = [c.get("field","") for c in conditions]
+            for row in (non_matches_sample or []):
+                parts = [f"  {f}='{row.get(f,'')}'" for f in cond_fields if f]
+                debug_lines.append("  " + " | ".join(parts))
+            debug_lines.append("")
+            debug_lines.append("Condições configuradas:")
+            for c in conditions:
+                debug_lines.append(f"  {c.get('field','')} {c.get('op','')} '{c.get('value','')}'")
+
+        dlg = PreviewDialog(matches[:20], rule, self._columns, self,
+                            debug_info="\n".join(debug_lines))
         dlg.exec()
 
     def _show_exec_result(self, rule_name: str, modified: int, errors: List[str]):
@@ -1069,25 +1172,39 @@ class PreviewDialog(QDialog):
     """Mostra uma amostra dos registros que serão afetados pela regra."""
 
     def __init__(self, matching_rows: List[Dict], rule: Dict,
-                 columns: List[str], parent=None):
+                 columns: List[str], parent=None, debug_info: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Prévia da Regra")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(760, 540)
         self.setStyleSheet(f"background:{_DARK};color:{_TEXT};")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(10)
 
+        count_color = _GREEN if matching_rows else _RED
         info = QLabel(
-            f"<b>{len(matching_rows)}</b> registro(s) serão afetados "
+            f"<span style='color:{count_color};font-size:14px;font-weight:700;'>"
+            f"{len(matching_rows)}</span> registro(s) serão afetados "
             f"(amostra de até 20).<br>"
             f"<span style='color:{_MUTED};font-size:11px;'>"
-            f"Os valores abaixo mostram o resultado <i>simulado</i> das ações — "
+            f"Os valores abaixo mostram o resultado <i>simulado</i> — "
             f"nada foi gravado ainda.</span>")
         info.setTextFormat(Qt.TextFormat.RichText)
         info.setWordWrap(True)
         lay.addWidget(info)
+
+        # Debug info quando não há matches
+        if debug_info:
+            dbg = QTextEdit()
+            dbg.setReadOnly(True)
+            dbg.setMaximumHeight(130)
+            dbg.setPlainText(debug_info)
+            dbg.setStyleSheet(
+                f"QTextEdit{{background:#2a1a00;color:{_YELLOW};"
+                f"border:1px solid #6a4a00;border-radius:5px;"
+                f"font-family:monospace;font-size:11px;padding:4px;}}")
+            lay.addWidget(dbg)
 
         # Aplica ações simuladas
         from core.rule_engine import RuleEngine
@@ -1113,20 +1230,25 @@ class PreviewDialog(QDialog):
         text.setReadOnly(True)
         text.setStyleSheet(
             f"QTextEdit{{background:{_SURFACE};color:{_TEXT};"
-            f"border:1px solid {_BORDER};border-radius:5px;font-family:monospace;font-size:11px;}}")
+            f"border:1px solid {_BORDER};border-radius:5px;"
+            f"font-family:monospace;font-size:11px;padding:6px;}}")
 
         lines = []
         action_fields = [a.get("field", "") for a in rule.get("actions", [])]
         for orig, sim in previews:
             parts = []
             for f in action_fields:
-                ov = orig.get(f, "")
-                nv = sim.get(f, "")
-                if ov != nv:
-                    parts.append(f"{f}: '{ov}' → '{nv}'")
+                ov = str(orig.get(f, ""))
+                nv = str(sim.get(f, ""))
+                arrow = " → " if ov != nv else " = "
+                parts.append(f"{f}: '{ov}'{arrow}'{nv}'")
             if parts:
                 lines.append("  |  ".join(parts))
-        text.setPlainText("\n".join(lines) if lines else "(Nenhuma diferença detectada na amostra)")
+
+        if not lines and matching_rows:
+            lines.append("(Valores já iguais ao resultado da ação — sem diferença visual)")
+
+        text.setPlainText("\n".join(lines) if lines else "")
         lay.addWidget(text, 1)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
