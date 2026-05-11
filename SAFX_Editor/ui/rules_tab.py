@@ -566,9 +566,11 @@ class RulesTab(QWidget):
         self._in_sync = False        # evita loop de sinalização
         self._active_thread = None   # ref para evitar GC da thread de execução
         self._active_worker = None
-        self._exec_prog = None       # QProgressDialog da execução atual
-        self._exec_rule_ref = None   # regra em execução
-        self._exec_pkg_name = ""     # nome do pacote em execução
+        self._exec_prog = None            # QProgressDialog da execução atual
+        self._exec_rule_ref = None        # regra em execução
+        self._exec_pkg_name = ""          # nome do pacote em execução
+        self._exec_pending_changed = False  # emitir dataChanged após thread.finished
+        self._exec_result = None            # resultado guardado entre worker.finished → thread.finished
         self._build()
 
     # ── Construção da UI ──────────────────────────────────────────────────────
@@ -1392,6 +1394,8 @@ class RulesTab(QWidget):
             thread.started.connect(worker.run_package)
             worker.pkg_finished.connect(self._on_exec_pkg_done)
 
+        # thread.finished → limpa refs Python DEPOIS da thread parar de verdade
+        thread.finished.connect(self._on_thread_finished)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
 
@@ -1402,46 +1406,72 @@ class RulesTab(QWidget):
     # ── Callbacks de execução (slots de instância — seguros entre threads) ──
 
     def _exec_cleanup(self):
-        """Fecha progress e reabilita botões (sempre na main thread)."""
-        try:
-            self._exec_prog.close()
-        except Exception:
-            pass
-        try:
-            self._active_thread.quit()
-        except Exception:
-            pass
+        """Fecha progress e reabilita botões (sempre na main thread).
+        NÃO anula _active_thread/_active_worker aqui — isso seria GC prematuro
+        do QThread ainda em execução. As referências são limpas em _on_thread_finished,
+        disparado pelo sinal QThread.finished após a thread ter parado de verdade.
+        """
+        if self._exec_prog is not None:
+            try:
+                self._exec_prog.close()
+            except Exception:
+                pass
+        if self._active_thread is not None:
+            try:
+                self._active_thread.quit()
+            except Exception:
+                pass
         self._btn_exec_rule.setEnabled(True)
         self._btn_exec_pkg.setEnabled(True)
-        self._active_thread = None
-        self._active_worker = None
 
     def _on_exec_rule_done(self, n: int, errors: list):
-        """Slot chamado quando uma regra termina (AutoConnection = main thread)."""
+        """Slot chamado quando uma regra termina (AutoConnection = main thread).
+        Apenas salva resultado — a exibição ocorre em _on_thread_finished,
+        garantindo que a thread parou antes de emitir dataChanged.
+        """
+        self._exec_result = ("rule", n, errors, None)
         self._exec_cleanup()
-        rule_name = (self._exec_rule_ref or {}).get("name", "?")
-        self._show_exec_result(rule_name, n, errors)
-        if n > 0:
-            # Adia o refresh para o próximo ciclo do event loop
-            QTimer.singleShot(50, self.dataChanged.emit)
 
     def _on_exec_pkg_done(self, results: list):
-        """Slot chamado quando um pacote termina (AutoConnection = main thread)."""
+        """Slot chamado quando um pacote termina."""
+        self._exec_result = ("pkg", 0, [], results)
         self._exec_cleanup()
-        total = sum(n for _, n, _ in results)
-        lines = [f"• {rname}: {n} linha(s) modificada(s)"
-                 for rname, n, _ in results]
-        all_errors = [e for _, _, errs in results for e in errs]
-        summary = "\n".join(lines) or "Nenhuma regra executada."
-        if all_errors:
-            summary += "\n\nErros:\n" + "\n".join(all_errors[:10])
-        pkg_name = self._exec_pkg_name or "?"
-        QMessageBox.information(
-            self, "Resultado do Pacote",
-            f"Pacote: {pkg_name}\n\n"
-            f"Total: {total} linha(s) modificada(s)\n\n{summary}")
-        if total > 0:
-            QTimer.singleShot(50, self.dataChanged.emit)
+
+    def _on_thread_finished(self):
+        """Chamado quando QThread.finished é emitido.
+        A thread PAROU COMPLETAMENTE — seguro liberar refs, exibir resultado
+        e emitir dataChanged para o refresh da grade de dados.
+        """
+        self._active_thread = None
+        self._active_worker = None
+        self._exec_prog = None
+
+        result = getattr(self, "_exec_result", None)
+        self._exec_result = None
+        if result is None:
+            return
+
+        kind, n, errors, pkg_results = result
+
+        if kind == "rule":
+            rule_name = (self._exec_rule_ref or {}).get("name", "?")
+            self._show_exec_result(rule_name, n, errors)
+            if n > 0:
+                self.dataChanged.emit()
+        else:
+            total = sum(rn for _, rn, _ in pkg_results)
+            lines = [f"• {rname}: {rn} linha(s) modificada(s)"
+                     for rname, rn, _ in pkg_results]
+            all_errs = [e for _, _, errs in pkg_results for e in errs]
+            summary = "\n".join(lines) or "Nenhuma regra executada."
+            if all_errs:
+                summary += "\n\nErros:\n" + "\n".join(all_errs[:10])
+            QMessageBox.information(
+                self, "Resultado do Pacote",
+                f"Pacote: {self._exec_pkg_name or '?'}\n\n"
+                f"Total: {total} linha(s) modificada(s)\n\n{summary}")
+            if total > 0:
+                self.dataChanged.emit()
 
     def _preview_rule(self):
         """Executa a regra em modo preview (só retorna amostra sem gravar)."""
