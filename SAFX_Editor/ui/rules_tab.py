@@ -750,6 +750,16 @@ class RulesTab(QWidget):
         hdr_row.addWidget(self._chk_enabled)
         ed_lay.addLayout(hdr_row)
 
+        # Tabela vinculada (informativo)
+        tbl_row = QHBoxLayout()
+        tbl_row.addWidget(_lbl("Tabela:", _MUTED))
+        self._lbl_rule_table = QLabel("—")
+        self._lbl_rule_table.setStyleSheet(
+            f"color:{_ACCENT};font-size:12px;font-weight:700;background:transparent;")
+        tbl_row.addWidget(self._lbl_rule_table)
+        tbl_row.addStretch()
+        ed_lay.addLayout(tbl_row)
+
         # Descrição opcional
         desc_row = QHBoxLayout()
         desc_row.addWidget(_lbl("Desc:", _MUTED))
@@ -948,9 +958,11 @@ class RulesTab(QWidget):
         self._help_text.setStyleSheet(
             f"color:{muted};font-size:11px;background:transparent;")
 
-        # ── 9. Hint de campos ─────────────────────────────────────────────────
+        # ── 9. Hint de campos e label de tabela vinculada ─────────────────────
         self._lbl_fields_hint.setStyleSheet(
             f"color:{muted};font-size:12px;background:transparent;")
+        self._lbl_rule_table.setStyleSheet(
+            f"color:{accent};font-size:12px;font-weight:700;background:transparent;")
 
         # ── 10. Todos os QLineEdit (exceto os internos ao QComboBox) ─────────
         combo_edits = {
@@ -1062,9 +1074,13 @@ class RulesTab(QWidget):
                 rule = self.engine.get_rule(rule_id)
                 if rule:
                     icon = "●" if rule.get("enabled", True) else "○"
-                    it2 = QListWidgetItem(f"    {icon}  {rule.get('name', '?')}")
+                    tbl = rule.get("table", "")
+                    tbl_info = f"  [{tbl}]" if tbl else ""
+                    it2 = QListWidgetItem(
+                        f"    {icon}  {rule.get('name', '?')}{tbl_info}")
                     it2.setData(Qt.ItemDataRole.UserRole, ("rule", rule.get("id")))
                     it2.setForeground(Qt.GlobalColor.lightGray)
+                    it2.setToolTip(f"Tabela: {tbl}" if tbl else "Tabela não definida")
                     self._rule_list.addItem(it2)
 
         # Regras avulsas (não pertencentes a nenhum pacote)
@@ -1083,9 +1099,13 @@ class RulesTab(QWidget):
 
             for rule in standalone:
                 icon = "●" if rule.get("enabled", True) else "○"
-                it = QListWidgetItem(f"    {icon}  {rule.get('name', '?')}")
+                tbl = rule.get("table", "")
+                tbl_info = f"  [{tbl}]" if tbl else ""
+                it = QListWidgetItem(
+                    f"    {icon}  {rule.get('name', '?')}{tbl_info}")
                 it.setData(Qt.ItemDataRole.UserRole, ("rule", rule.get("id")))
                 it.setForeground(Qt.GlobalColor.lightGray)
+                it.setToolTip(f"Tabela: {tbl}" if tbl else "Tabela não definida")
                 self._rule_list.addItem(it)
 
     def _on_list_item_changed(self, item: Optional[QListWidgetItem], _prev=None):
@@ -1124,6 +1144,10 @@ class RulesTab(QWidget):
         self._rb_and.setChecked(logic == "AND")
         self._rb_or.setChecked(logic == "OR")
 
+        # Tabela vinculada (salva junto com a regra)
+        tbl = rule.get("table", "")
+        self._lbl_rule_table.setText(tbl if tbl else "— (não vinculada)")
+
         for cond in rule.get("conditions", []):
             row = self._add_condition_row()
             row.load_dict(cond)
@@ -1151,6 +1175,7 @@ class RulesTab(QWidget):
             "name": self._edit_name.text() or "Sem nome",
             "description": self._edit_desc.text(),
             "enabled": self._chk_enabled.isChecked(),
+            "table": self._combo_table.currentText(),   # tabela selecionada ao salvar
             "condition_logic": "OR" if self._rb_or.isChecked() else "AND",
             "conditions": [cr.to_dict() for cr in self._condition_rows],
             "actions": [ar.to_dict() for ar in self._action_rows],
@@ -1211,6 +1236,9 @@ class RulesTab(QWidget):
         self._edit_desc.setText("")
         self._chk_enabled.setChecked(True)
         self._rb_and.setChecked(True)
+        # Mostra tabela atual como tabela vinculada da nova regra
+        tbl = self._combo_table.currentText()
+        self._lbl_rule_table.setText(tbl if tbl else "— (selecione uma tabela acima)")
         self._show_editor()
         self._edit_name.setFocus()
         self._set_status("Nova regra — configure as condições e ações, depois clique em 💾 Salvar.")
@@ -1394,10 +1422,11 @@ class RulesTab(QWidget):
             thread.started.connect(worker.run_package)
             worker.pkg_finished.connect(self._on_exec_pkg_done)
 
-        # thread.finished → limpa refs Python DEPOIS da thread parar de verdade
-        thread.finished.connect(self._on_thread_finished)
+        # ORDEM IMPORTA: deleteLater ANTES de _on_thread_finished
+        # para que o Qt reivindique ownership do C++ antes de liberarmos a ref Python
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_thread_finished)
 
         self._active_thread = thread
         self._active_worker = worker
@@ -1425,53 +1454,64 @@ class RulesTab(QWidget):
         self._btn_exec_pkg.setEnabled(True)
 
     def _on_exec_rule_done(self, n: int, errors: list):
-        """Slot chamado quando uma regra termina (AutoConnection = main thread).
-        Apenas salva resultado — a exibição ocorre em _on_thread_finished,
-        garantindo que a thread parou antes de emitir dataChanged.
+        """Worker concluiu — salva resultado e pede cleanup.
+        NÃO faz UI aqui (ainda dentro do ciclo de sinais da thread).
         """
         self._exec_result = ("rule", n, errors, None)
         self._exec_cleanup()
 
     def _on_exec_pkg_done(self, results: list):
-        """Slot chamado quando um pacote termina."""
+        """Worker de pacote concluiu."""
         self._exec_result = ("pkg", 0, [], results)
         self._exec_cleanup()
 
     def _on_thread_finished(self):
-        """Chamado quando QThread.finished é emitido.
-        A thread PAROU COMPLETAMENTE — seguro liberar refs, exibir resultado
-        e emitir dataChanged para o refresh da grade de dados.
+        """Chamado quando QThread.finished é emitido (thread parou de verdade).
+        Libera refs e agenda a exibição do resultado via QTimer para sair
+        completamente do ciclo de sinais antes de abrir diálogos.
         """
+        # Libera refs — deleteLater já foi chamado antes (conexão anterior),
+        # então o Qt reivindica o ownership C++ antes de chegarmos aqui.
         self._active_thread = None
         self._active_worker = None
         self._exec_prog = None
 
-        result = getattr(self, "_exec_result", None)
-        self._exec_result = None
-        if result is None:
-            return
+        # Agenda exibição no próximo ciclo do event loop (fora do signal handler)
+        QTimer.singleShot(0, self._show_exec_result_deferred)
 
-        kind, n, errors, pkg_results = result
+    def _show_exec_result_deferred(self):
+        """Exibe resultado e atualiza dados — chamado pelo QTimer, fora de qualquer
+        signal handler de thread, portanto seguro para UI e dataChanged."""
+        try:
+            result = getattr(self, "_exec_result", None)
+            self._exec_result = None
+            if result is None:
+                return
 
-        if kind == "rule":
-            rule_name = (self._exec_rule_ref or {}).get("name", "?")
-            self._show_exec_result(rule_name, n, errors)
-            if n > 0:
-                self.dataChanged.emit()
-        else:
-            total = sum(rn for _, rn, _ in pkg_results)
-            lines = [f"• {rname}: {rn} linha(s) modificada(s)"
-                     for rname, rn, _ in pkg_results]
-            all_errs = [e for _, _, errs in pkg_results for e in errs]
-            summary = "\n".join(lines) or "Nenhuma regra executada."
-            if all_errs:
-                summary += "\n\nErros:\n" + "\n".join(all_errs[:10])
-            QMessageBox.information(
-                self, "Resultado do Pacote",
-                f"Pacote: {self._exec_pkg_name or '?'}\n\n"
-                f"Total: {total} linha(s) modificada(s)\n\n{summary}")
-            if total > 0:
-                self.dataChanged.emit()
+            kind, n, errors, pkg_results = result
+
+            if kind == "rule":
+                rule_name = (self._exec_rule_ref or {}).get("name", "?")
+                self._show_exec_result(rule_name, n, errors)
+                if n > 0:
+                    self.dataChanged.emit()
+            else:
+                total = sum(rn for _, rn, _ in pkg_results)
+                lines = [f"• {rname}: {rn} linha(s) modificada(s)"
+                         for rname, rn, _ in pkg_results]
+                all_errs = [e for _, _, errs in pkg_results for e in errs]
+                summary = "\n".join(lines) or "Nenhuma regra executada."
+                if all_errs:
+                    summary += "\n\nErros:\n" + "\n".join(all_errs[:10])
+                QMessageBox.information(
+                    self, "Resultado do Pacote",
+                    f"Pacote: {self._exec_pkg_name or '?'}\n\n"
+                    f"Total: {total} linha(s) modificada(s)\n\n{summary}")
+                if total > 0:
+                    self.dataChanged.emit()
+        except Exception as exc:
+            logger.exception("Erro ao exibir resultado da regra: %s", exc)
+            self._set_status(f"Erro ao exibir resultado: {exc}", error=True)
 
     def _preview_rule(self):
         """Executa a regra em modo preview (só retorna amostra sem gravar)."""
