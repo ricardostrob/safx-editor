@@ -290,122 +290,299 @@ class TabExportacao(QWidget):
 
 
 class TabSFTP(QWidget):
+    """Aba de SFTP com suporte a múltiplos perfis (um por sistema/cliente)."""
+
     def __init__(self, cfg: AppConfig):
         super().__init__()
         self.cfg = cfg
+        self._profiles: list = []
+        self._current_idx: int = -1
         self._thread = None
         self._build()
+        self._load_all()
 
+    # ── Construção da UI ──────────────────────────────────────────────────────
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(16, 16, 16, 16)
+        from PyQt6.QtWidgets import QSplitter, QListWidget
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        s = self.cfg.sftp
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
 
-        self.enabled_cb = _check("Habilitar envio via SFTP", s.get("enabled", False))
-        self.enabled_cb.setStyleSheet(
-            f"QCheckBox{{color:{_GREEN};font-size:13px;font-weight:700;}}"
-            f"QCheckBox::indicator{{width:18px;height:18px;"
+        # ── Painel esquerdo: lista de perfis ──────────────────────────────────
+        left = QWidget()
+        left.setMinimumWidth(160)
+        left.setMaximumWidth(220)
+        left.setStyleSheet(f"background:{_SURFACE};border-right:1px solid {_BORDER};")
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(10, 12, 10, 10)
+        ll.setSpacing(6)
+
+        lbl_title = QLabel("Perfis SFTP")
+        lbl_title.setStyleSheet(
+            f"color:{_ACCENT};font-size:12px;font-weight:700;")
+        ll.addWidget(lbl_title)
+
+        self._profile_list = QListWidget()
+        self._profile_list.setStyleSheet(
+            f"QListWidget{{background:{_DARK};border:1px solid {_BORDER};"
+            f"border-radius:5px;color:{_TEXT};font-size:12px;}}"
+            f"QListWidget::item{{padding:8px 10px;}}"
+            f"QListWidget::item:selected{{background:{_ACCENT};color:{_DARK};}}")
+        self._profile_list.currentRowChanged.connect(self._on_profile_selected)
+        ll.addWidget(self._profile_list, 1)
+
+        # Botões gerenciar perfis
+        btn_add = QPushButton("+ Adicionar")
+        btn_add.setFixedHeight(28)
+        btn_add.setStyleSheet(
+            f"QPushButton{{background:#1a3a1a;color:{_GREEN};border:1px solid #2a6a2a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#2a5a2a;}}")
+        btn_add.clicked.connect(self._add_profile)
+        ll.addWidget(btn_add)
+
+        btn_dup = QPushButton("⧉ Duplicar")
+        btn_dup.setFixedHeight(28)
+        btn_dup.setStyleSheet(
+            f"QPushButton{{background:#1a1a3a;color:{_ACCENT};border:1px solid #2a3a6a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#2a2a5a;}}")
+        btn_dup.clicked.connect(self._dup_profile)
+        ll.addWidget(btn_dup)
+
+        btn_del = QPushButton("− Remover")
+        btn_del.setFixedHeight(28)
+        btn_del.setStyleSheet(
+            f"QPushButton{{background:#3a1a1a;color:{_RED};border:1px solid #6a2a2a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#5a2a2a;}}")
+        btn_del.clicked.connect(self._del_profile)
+        ll.addWidget(btn_del)
+
+        splitter.addWidget(left)
+
+        # ── Painel direito: formulário do perfil selecionado ──────────────────
+        right = QWidget()
+        right.setStyleSheet(f"background:{_DARK};")
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(16, 12, 16, 12)
+        rl.setSpacing(10)
+
+        # Nome do perfil
+        name_row = QHBoxLayout()
+        name_row.addWidget(_label("Nome do perfil:"))
+        self._edit_name = _line_edit("Ex: MasterSAF Produção, Cliente XYZ...")
+        self._edit_name.textChanged.connect(self._on_name_changed)
+        name_row.addWidget(self._edit_name, 1)
+        rl.addLayout(name_row)
+
+        # Habilitar
+        self._chk_enabled = _check("Habilitar este perfil SFTP", True)
+        self._chk_enabled.setStyleSheet(
+            f"QCheckBox{{color:{_GREEN};font-size:12px;font-weight:700;}}"
+            f"QCheckBox::indicator{{width:16px;height:16px;"
             f"border:2px solid {_GREEN};border-radius:3px;background:{_SURFACE};}}"
             f"QCheckBox::indicator:checked{{background:{_GREEN};}}")
-        layout.addWidget(self.enabled_cb)
+        rl.addWidget(self._chk_enabled)
 
         g = _group("Conexão SFTP")
         form = QFormLayout(g)
         form.setSpacing(8)
+        form.setContentsMargins(10, 14, 10, 10)
 
-        self.host = _line_edit("Ex: sftp.adejo.com.br ou 192.168.1.100")
-        self.host.setText(s.get("host", ""))
-        form.addRow(_label("Host:"), self.host)
+        self._host = _line_edit("Ex: sftp.empresa.com.br ou 192.168.1.100")
+        form.addRow(_label("Host:"), self._host)
 
-        self.port = _spin(1, 65535, s.get("port", 22))
-        form.addRow(_label("Porta:"), self.port)
+        self._port = _spin(1, 65535, 22)
+        form.addRow(_label("Porta:"), self._port)
 
-        self.username = _line_edit("usuário SFTP")
-        self.username.setText(s.get("username", ""))
-        form.addRow(_label("Usuário:"), self.username)
+        self._username = _line_edit("usuário SFTP")
+        form.addRow(_label("Usuário:"), self._username)
 
-        self.password = _line_edit("senha", password=True)
-        self.password.setText(s.get("password", ""))
-        form.addRow(_label("Senha:"), self.password)
+        self._password = _line_edit("senha", password=True)
+        form.addRow(_label("Senha:"), self._password)
 
-        self.key_path = _line_edit("Caminho da chave SSH privada (opcional)")
-        self.key_path.setText(s.get("key_path", ""))
+        self._key_path = _line_edit("Caminho da chave SSH privada (opcional)")
         btn_key = _btn("Procurar...", width=90)
         btn_key.clicked.connect(self._browse_key)
         row_key = QHBoxLayout()
-        row_key.addWidget(self.key_path)
+        row_key.addWidget(self._key_path)
         row_key.addWidget(btn_key)
         form.addRow(_label("Chave SSH:"), row_key)
 
-        self.remote_path = _line_edit("Ex: /home/safx/exports ou /data/incoming")
-        self.remote_path.setText(s.get("remote_path", "/"))
-        form.addRow(_label("Caminho remoto:"), self.remote_path)
+        self._remote_path = _line_edit("Ex: /home/safx/exports")
+        form.addRow(_label("Caminho remoto:"), self._remote_path)
 
-        self.timeout = _spin(5, 120, s.get("timeout", 30))
-        form.addRow(_label("Timeout (s):"), self.timeout)
+        self._timeout = _spin(5, 120, 30)
+        form.addRow(_label("Timeout (s):"), self._timeout)
 
-        layout.addWidget(g)
+        rl.addWidget(g)
 
-        # Botão de teste
-        row_test = QHBoxLayout()
-        self.btn_test = _btn("Testar Conexão", _ACCENT, _DARK, 150)
-        self.btn_test.clicked.connect(self._test_connection)
-        row_test.addWidget(self.btn_test)
-        self.test_result = QLabel("")
-        self.test_result.setWordWrap(True)
-        self.test_result.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        row_test.addWidget(self.test_result)
-        row_test.addStretch()
-        layout.addLayout(row_test)
-        layout.addStretch()
+        # Botões de ação
+        action_row = QHBoxLayout()
+        self._btn_save = _btn("💾 Salvar Perfil", _ACCENT, _DARK, 140)
+        self._btn_save.clicked.connect(self._save_current)
+        action_row.addWidget(self._btn_save)
+
+        self._btn_test = _btn("🔌 Testar Conexão", _YELLOW, _DARK, 150)
+        self._btn_test.clicked.connect(self._test_connection)
+        action_row.addWidget(self._btn_test)
+
+        action_row.addStretch()
+        rl.addLayout(action_row)
+
+        self._lbl_result = QLabel("")
+        self._lbl_result.setWordWrap(True)
+        self._lbl_result.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        rl.addWidget(self._lbl_result)
+        rl.addStretch()
+
+        # Placeholder quando não há perfil selecionado
+        self._placeholder = QLabel(
+            "← Selecione um perfil ou clique em  + Adicionar")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._placeholder.setStyleSheet(f"color:{_MUTED};font-size:13px;")
+        rl.addWidget(self._placeholder)
+
+        splitter.addWidget(right)
+        splitter.setSizes([180, 500])
+        root.addWidget(splitter)
+
+        self._right_panel = right
+        self._form_widgets = [g, self._chk_enabled,
+                              self._edit_name, self._btn_save, self._btn_test,
+                              self._lbl_result]
+        self._set_form_visible(False)
+
+    # ── Dados ─────────────────────────────────────────────────────────────────
+    def _load_all(self):
+        self._profiles = self.cfg.get_sftp_profiles()
+        self._profile_list.clear()
+        for p in self._profiles:
+            self._profile_list.addItem(p.get('name', '?'))
+        if self._profiles:
+            self._profile_list.setCurrentRow(0)
+
+    def _set_form_visible(self, visible: bool):
+        for w in self._form_widgets:
+            w.setVisible(visible)
+        self._placeholder.setVisible(not visible)
+
+    def _on_profile_selected(self, idx: int):
+        if 0 <= idx < len(self._profiles):
+            self._current_idx = idx
+            p = self._profiles[idx]
+            self._edit_name.blockSignals(True)
+            self._edit_name.setText(p.get('name', ''))
+            self._edit_name.blockSignals(False)
+            self._chk_enabled.setChecked(p.get('enabled', True))
+            self._host.setText(p.get('host', ''))
+            self._port.setValue(p.get('port', 22))
+            self._username.setText(p.get('username', ''))
+            self._password.setText(p.get('password', ''))
+            self._key_path.setText(p.get('key_path', ''))
+            self._remote_path.setText(p.get('remote_path', '/'))
+            self._timeout.setValue(p.get('timeout', 30))
+            self._lbl_result.setText("")
+            self._set_form_visible(True)
+        else:
+            self._current_idx = -1
+            self._set_form_visible(False)
+
+    def _on_name_changed(self, text: str):
+        if 0 <= self._current_idx < len(self._profiles):
+            self._profiles[self._current_idx]['name'] = text
+            self._profile_list.item(self._current_idx).setText(text)
+
+    def _current_profile_data(self) -> dict:
+        return {
+            'name':        self._edit_name.text() or 'Sem nome',
+            'enabled':     self._chk_enabled.isChecked(),
+            'host':        self._host.text(),
+            'port':        self._port.value(),
+            'username':    self._username.text(),
+            'password':    self._password.text(),
+            'key_path':    self._key_path.text(),
+            'remote_path': self._remote_path.text(),
+            'timeout':     self._timeout.value(),
+        }
+
+    def _save_current(self):
+        if self._current_idx < 0:
+            return
+        self._profiles[self._current_idx] = self._current_profile_data()
+        self.cfg.save_sftp_profiles(self._profiles)
+        self._lbl_result.setStyleSheet(f"color:{_GREEN};font-size:11px;font-weight:600;")
+        self._lbl_result.setText("✔ Perfil salvo.")
+
+    def _add_profile(self):
+        p = dict(AppConfig._DEFAULT_SFTP_PROFILE)
+        p['name'] = f"Sistema {len(self._profiles) + 1}"
+        self._profiles.append(p)
+        self._profile_list.addItem(p['name'])
+        self._profile_list.setCurrentRow(len(self._profiles) - 1)
+        self.cfg.save_sftp_profiles(self._profiles)
+
+    def _dup_profile(self):
+        if self._current_idx < 0:
+            return
+        import copy
+        p = copy.deepcopy(self._profiles[self._current_idx])
+        p['name'] = p['name'] + " (cópia)"
+        self._profiles.append(p)
+        self._profile_list.addItem(p['name'])
+        self._profile_list.setCurrentRow(len(self._profiles) - 1)
+        self.cfg.save_sftp_profiles(self._profiles)
+
+    def _del_profile(self):
+        if self._current_idx < 0:
+            return
+        from PyQt6.QtWidgets import QMessageBox
+        name = self._profiles[self._current_idx].get('name', '')
+        r = QMessageBox.question(self, "Remover perfil",
+                                 f"Remover o perfil '{name}'?")
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        self._profiles.pop(self._current_idx)
+        self._profile_list.takeItem(self._current_idx)
+        self.cfg.save_sftp_profiles(self._profiles)
+        new_idx = min(self._current_idx, len(self._profiles) - 1)
+        if new_idx >= 0:
+            self._profile_list.setCurrentRow(new_idx)
+        else:
+            self._set_form_visible(False)
 
     def _browse_key(self):
         f, _ = QFileDialog.getOpenFileName(
             self, "Selecionar Chave SSH Privada", "",
             "Chaves SSH (*.pem *.key *.ppk *.rsa);;Todos os arquivos (*)")
         if f:
-            self.key_path.setText(f)
+            self._key_path.setText(f)
 
     def _test_connection(self):
-        self.btn_test.setEnabled(False)
-        self.btn_test.setText("Testando...")
-        self.test_result.setText("")
-        self.test_result.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-
-        cfg = {
-            "host": self.host.text(),
-            "port": self.port.value(),
-            "username": self.username.text(),
-            "password": self.password.text(),
-            "key_path": self.key_path.text(),
-            "remote_path": self.remote_path.text(),
-            "timeout": self.timeout.value(),
-        }
+        self._btn_test.setEnabled(False)
+        self._btn_test.setText("Testando...")
+        self._lbl_result.setText("")
+        cfg = self._current_profile_data()
         self._thread = ConnectionTestThread(cfg)
         self._thread.result.connect(self._on_test_result)
         self._thread.start()
 
     def _on_test_result(self, ok: bool, msg: str):
-        self.btn_test.setEnabled(True)
-        self.btn_test.setText("Testar Conexão")
+        self._btn_test.setEnabled(True)
+        self._btn_test.setText("🔌 Testar Conexão")
         color = _GREEN if ok else _RED
-        self.test_result.setStyleSheet(
-            f"color:{color};font-size:11px;font-weight:600;")
-        self.test_result.setText(("✔ " if ok else "✖ ") + msg.split('\n')[0])
+        self._lbl_result.setStyleSheet(f"color:{color};font-size:11px;font-weight:600;")
+        self._lbl_result.setText(("✔ " if ok else "✖ ") + msg.split('\n')[0])
 
     def apply(self):
-        self.cfg.set_section("sftp", {
-            "enabled": self.enabled_cb.isChecked(),
-            "host": self.host.text(),
-            "port": self.port.value(),
-            "username": self.username.text(),
-            "password": self.password.text(),
-            "key_path": self.key_path.text(),
-            "remote_path": self.remote_path.text(),
-            "timeout": self.timeout.value(),
-        })
+        """Salva todos os perfis (chamado pelo botão Salvar e Fechar)."""
+        if self._current_idx >= 0:
+            self._profiles[self._current_idx] = self._current_profile_data()
+        self.cfg.save_sftp_profiles(self._profiles)
 
 
 class TabAPI(QWidget):
@@ -973,11 +1150,80 @@ class SettingsDialog(QDialog):
     # ─── Aba: Banco Externo Opcional ──────────────────────────────────────────
 
     def _build_tab_ext_db(self) -> QWidget:
-        from PyQt6.QtWidgets import QTableWidget, QHeaderView
+        """Aba de Banco Externo com suporte a múltiplos perfis de banco de dados."""
+        from PyQt6.QtWidgets import QSplitter, QListWidget, QScrollArea
+        self._db_profiles: list = []
+        self._db_current_idx: int = -1
+
         w = QWidget()
-        lay = QVBoxLayout(w)
-        lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(10)
+        root = QHBoxLayout(w)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(4)
+
+        # ── Painel esquerdo: lista de perfis ──────────────────────────────────
+        left = QWidget()
+        left.setMinimumWidth(160)
+        left.setMaximumWidth(220)
+        left.setStyleSheet(f"background:{_SURFACE};border-right:1px solid {_BORDER};")
+        ll = QVBoxLayout(left)
+        ll.setContentsMargins(10, 12, 10, 10)
+        ll.setSpacing(6)
+
+        lbl_title = QLabel("Bancos de Dados")
+        lbl_title.setStyleSheet(f"color:{_ACCENT};font-size:12px;font-weight:700;")
+        ll.addWidget(lbl_title)
+
+        self._db_list = QListWidget()
+        self._db_list.setStyleSheet(
+            f"QListWidget{{background:{_DARK};border:1px solid {_BORDER};"
+            f"border-radius:5px;color:{_TEXT};font-size:12px;}}"
+            f"QListWidget::item{{padding:8px 10px;}}"
+            f"QListWidget::item:selected{{background:{_ACCENT};color:{_DARK};}}")
+        self._db_list.currentRowChanged.connect(self._on_db_selected)
+        ll.addWidget(self._db_list, 1)
+
+        btn_db_add = QPushButton("+ Adicionar")
+        btn_db_add.setFixedHeight(28)
+        btn_db_add.setStyleSheet(
+            f"QPushButton{{background:#1a3a1a;color:{_GREEN};border:1px solid #2a6a2a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#2a5a2a;}}")
+        btn_db_add.clicked.connect(self._db_add)
+        ll.addWidget(btn_db_add)
+
+        btn_db_dup = QPushButton("⧉ Duplicar")
+        btn_db_dup.setFixedHeight(28)
+        btn_db_dup.setStyleSheet(
+            f"QPushButton{{background:#1a1a3a;color:{_ACCENT};border:1px solid #2a3a6a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#2a2a5a;}}")
+        btn_db_dup.clicked.connect(self._db_dup)
+        ll.addWidget(btn_db_dup)
+
+        btn_db_del = QPushButton("− Remover")
+        btn_db_del.setFixedHeight(28)
+        btn_db_del.setStyleSheet(
+            f"QPushButton{{background:#3a1a1a;color:{_RED};border:1px solid #6a2a2a;"
+            f"border-radius:4px;font-size:11px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#5a2a2a;}}")
+        btn_db_del.clicked.connect(self._db_del)
+        ll.addWidget(btn_db_del)
+
+        splitter.addWidget(left)
+
+        # ── Painel direito: formulário ─────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea{{border:none;background:{_DARK};}}")
+
+        right = QWidget()
+        right.setStyleSheet(f"background:{_DARK};")
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(16, 12, 16, 12)
+        rl.setSpacing(10)
 
         info = QLabel(
             "ℹ  Banco externo OPCIONAL — o sistema funciona normalmente sem ele.\n"
@@ -985,15 +1231,25 @@ class SettingsDialog(QDialog):
             "Suporte: SQLite local  •  PostgreSQL  •  Supabase  •  Oracle  •  MySQL")
         info.setStyleSheet(f"color:{_MUTED};font-size:11px;")
         info.setWordWrap(True)
-        lay.addWidget(info)
+        rl.addWidget(info)
 
-        # Habilitar banco externo
-        self.chk_ext_db = QCheckBox("Habilitar banco de dados externo para persistência")
-        self.chk_ext_db.setChecked(self.cfg.get_value('ext_db', 'enabled', False))
-        self.chk_ext_db.toggled.connect(self._on_ext_db_toggle)
-        lay.addWidget(self.chk_ext_db)
+        # Nome do perfil
+        name_row = QHBoxLayout()
+        name_row.addWidget(_label("Nome:"))
+        self._db_edit_name = _line_edit("Ex: Banco Produção, Homologação...")
+        self._db_edit_name.textChanged.connect(self._on_db_name_changed)
+        name_row.addWidget(self._db_edit_name, 1)
+        rl.addLayout(name_row)
 
-        gb = QGroupBox("Configuração do Banco")
+        self._db_chk_enabled = _check("Habilitar este banco para exportação", True)
+        self._db_chk_enabled.setStyleSheet(
+            f"QCheckBox{{color:{_GREEN};font-size:12px;font-weight:700;}}"
+            f"QCheckBox::indicator{{width:16px;height:16px;"
+            f"border:2px solid {_GREEN};border-radius:3px;background:{_SURFACE};}}"
+            f"QCheckBox::indicator:checked{{background:{_GREEN};}}")
+        rl.addWidget(self._db_chk_enabled)
+
+        gb = QGroupBox("Conexão com o Banco")
         gb.setStyleSheet(
             f"QGroupBox{{color:{_ACCENT};font-size:12px;font-weight:700;"
             f"border:1px solid {_BORDER};border-radius:6px;"
@@ -1004,58 +1260,58 @@ class SettingsDialog(QDialog):
         gl.setContentsMargins(10, 14, 10, 10)
         gl.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        def _row(lbl_txt, widget):
-            lbl = QLabel(lbl_txt)
-            lbl.setStyleSheet(f"color:{_MUTED};font-size:12px;")
-            gl.addRow(lbl, widget)
-
-        self.combo_ext_type = QComboBox()
+        self._db_combo_type = QComboBox()
         for key, name in [('sqlite', 'SQLite (arquivo local)'),
                           ('postgres', 'PostgreSQL'),
                           ('supabase', 'Supabase (PostgreSQL)'),
                           ('oracle', 'Oracle Database'),
                           ('mysql', 'MySQL / MariaDB')]:
-            self.combo_ext_type.addItem(name, userData=key)
-        self.combo_ext_type.setFixedHeight(32)
-        _row("Tipo:", self.combo_ext_type)
+            self._db_combo_type.addItem(name, userData=key)
+        self._db_combo_type.setFixedHeight(32)
+        gl.addRow(_label("Tipo:"), self._db_combo_type)
 
-        self.edit_ext_host = QLineEdit()
-        self.edit_ext_host.setFixedHeight(30)
-        self.edit_ext_host.setPlaceholderText("host ou caminho SQLite")
-        _row("Host/Arquivo:", self.edit_ext_host)
+        self._db_host = _line_edit("host ou caminho SQLite")
+        gl.addRow(_label("Host/Arquivo:"), self._db_host)
 
-        self.spin_ext_port = QSpinBox()
-        self.spin_ext_port.setRange(0, 65535)
-        self.spin_ext_port.setFixedHeight(30)
-        _row("Porta:", self.spin_ext_port)
+        self._db_port = _spin(0, 65535, 5432)
+        gl.addRow(_label("Porta:"), self._db_port)
 
-        self.edit_ext_db = QLineEdit()
-        self.edit_ext_db.setFixedHeight(30)
-        self.edit_ext_db.setPlaceholderText("database / schema / service_name")
-        _row("Database:", self.edit_ext_db)
+        self._db_name_field = _line_edit("database / schema / service_name")
+        gl.addRow(_label("Database:"), self._db_name_field)
 
-        self.edit_ext_user = QLineEdit()
-        self.edit_ext_user.setFixedHeight(30)
-        _row("Usuário:", self.edit_ext_user)
+        self._db_user = _line_edit("usuário")
+        gl.addRow(_label("Usuário:"), self._db_user)
 
-        self.edit_ext_pw = QLineEdit()
-        self.edit_ext_pw.setFixedHeight(30)
-        self.edit_ext_pw.setEchoMode(QLineEdit.EchoMode.Password)
-        _row("Senha:", self.edit_ext_pw)
+        self._db_pw = _line_edit("senha", password=True)
+        gl.addRow(_label("Senha:"), self._db_pw)
 
-        self.chk_persist_safx = QCheckBox(
-            "Salvar tabelas SAFX importadas no banco externo")
-        self.chk_persist_safx.setChecked(
-            self.cfg.get_value('ext_db', 'persist_tables', False))
-        gl.addWidget(self.chk_persist_safx)
+        self._db_chk_persist_safx = QCheckBox(
+            "Salvar tabelas SAFX importadas neste banco")
+        gl.addWidget(self._db_chk_persist_safx)
 
-        self.chk_persist_log = QCheckBox(
-            "Salvar change log no banco externo (sempre recomendado)")
-        self.chk_persist_log.setChecked(
-            self.cfg.get_value('ext_db', 'persist_log', True))
-        gl.addWidget(self.chk_persist_log)
+        self._db_chk_persist_log = QCheckBox(
+            "Salvar change log neste banco (recomendado)")
+        self._db_chk_persist_log.setChecked(True)
+        gl.addWidget(self._db_chk_persist_log)
 
-        lay.addWidget(gb)
+        rl.addWidget(gb)
+
+        # Botões ação
+        act_row = QHBoxLayout()
+        btn_db_save = _btn("💾 Salvar Perfil", _ACCENT, _DARK, 140)
+        btn_db_save.clicked.connect(self._db_save_current)
+        act_row.addWidget(btn_db_save)
+
+        btn_db_test = _btn("🔌 Testar Conexão", _YELLOW, _DARK, 150)
+        btn_db_test.clicked.connect(self._test_ext_db)
+        act_row.addWidget(btn_db_test)
+        act_row.addStretch()
+        rl.addLayout(act_row)
+
+        self.lbl_ext_db_status = QLabel("")
+        self.lbl_ext_db_status.setWordWrap(True)
+        self.lbl_ext_db_status.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        rl.addWidget(self.lbl_ext_db_status)
 
         # Scripts DDL
         gb_scripts = QGroupBox("Scripts de Criação das Tabelas")
@@ -1063,7 +1319,6 @@ class SettingsDialog(QDialog):
         sl = QVBoxLayout(gb_scripts)
         sl.addWidget(QLabel(
             "Baixe o script SQL para criar as tabelas no seu banco antes de conectar:"))
-
         scripts_row = QHBoxLayout()
         for db_type, label in [('postgres', 'PostgreSQL/Supabase'),
                                 ('oracle', 'Oracle'), ('mysql', 'MySQL'),
@@ -1073,82 +1328,150 @@ class SettingsDialog(QDialog):
             btn.clicked.connect(lambda _, t=db_type: self._save_ddl_script(t))
             scripts_row.addWidget(btn)
         sl.addLayout(scripts_row)
+        rl.addWidget(gb_scripts)
+        rl.addStretch()
 
-        lay.addWidget(gb_scripts)
+        # Placeholder vazio
+        self._db_placeholder = QLabel(
+            "← Selecione um banco ou clique em  + Adicionar")
+        self._db_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._db_placeholder.setStyleSheet(f"color:{_MUTED};font-size:13px;")
+        rl.addWidget(self._db_placeholder)
 
-        # Testar conexão + salvar
-        btn_row = QHBoxLayout()
+        self._db_form_widgets = [gb, self._db_chk_enabled,
+                                 self._db_edit_name, btn_db_save,
+                                 btn_db_test, self.lbl_ext_db_status]
+        self._db_set_form_visible(False)
 
-        btn_test = QPushButton("🔌 Testar Conexão")
-        btn_test.setFixedHeight(32)
-        btn_test.clicked.connect(self._test_ext_db)
-        btn_row.addWidget(btn_test)
+        scroll.setWidget(right)
+        splitter.addWidget(scroll)
+        splitter.setSizes([180, 500])
+        root.addWidget(splitter)
 
-        btn_save_ext = QPushButton("💾 Salvar")
-        btn_save_ext.setFixedHeight(32)
-        btn_save_ext.setStyleSheet(
-            f"QPushButton{{background:#1a4e1a;color:{_GREEN};"
-            f"border:1px solid #2a7a2a;border-radius:5px;font-weight:700;}}"
-            f"QPushButton:hover{{background:#2a7a2a;color:white;}}")
-        btn_save_ext.clicked.connect(self._save_ext_db_settings)
-        btn_row.addWidget(btn_save_ext)
-
-        lay.addLayout(btn_row)
-
-        self.lbl_ext_db_status = QLabel("")
-        self.lbl_ext_db_status.setWordWrap(True)
-        lay.addWidget(self.lbl_ext_db_status)
-
-        lay.addStretch()
-        self._load_ext_db_settings()
+        self._db_load_all()
         return w
+
+    def _db_set_form_visible(self, visible: bool):
+        for ww in self._db_form_widgets:
+            ww.setVisible(visible)
+        self._db_placeholder.setVisible(not visible)
+
+    def _db_load_all(self):
+        self._db_profiles = self.cfg.get_db_profiles()
+        self._db_list.clear()
+        for p in self._db_profiles:
+            self._db_list.addItem(p.get('name', '?'))
+        if self._db_profiles:
+            self._db_list.setCurrentRow(0)
+
+    def _on_db_selected(self, idx: int):
+        if 0 <= idx < len(self._db_profiles):
+            self._db_current_idx = idx
+            p = self._db_profiles[idx]
+            self._db_edit_name.blockSignals(True)
+            self._db_edit_name.setText(p.get('name', ''))
+            self._db_edit_name.blockSignals(False)
+            self._db_chk_enabled.setChecked(p.get('enabled', True))
+            db_type = p.get('type', 'sqlite')
+            for i in range(self._db_combo_type.count()):
+                if self._db_combo_type.itemData(i) == db_type:
+                    self._db_combo_type.setCurrentIndex(i)
+                    break
+            self._db_host.setText(p.get('host', ''))
+            self._db_port.setValue(p.get('port', 5432))
+            self._db_name_field.setText(p.get('database', ''))
+            self._db_user.setText(p.get('username', ''))
+            self._db_pw.setText(p.get('password', ''))
+            self._db_chk_persist_safx.setChecked(p.get('persist_tables', False))
+            self._db_chk_persist_log.setChecked(p.get('persist_log', True))
+            self.lbl_ext_db_status.setText("")
+            self._db_set_form_visible(True)
+        else:
+            self._db_current_idx = -1
+            self._db_set_form_visible(False)
+
+    def _on_db_name_changed(self, text: str):
+        if 0 <= self._db_current_idx < len(self._db_profiles):
+            self._db_profiles[self._db_current_idx]['name'] = text
+            self._db_list.item(self._db_current_idx).setText(text)
+
+    def _db_current_data(self) -> dict:
+        return {
+            'name':           self._db_edit_name.text() or 'Sem nome',
+            'enabled':        self._db_chk_enabled.isChecked(),
+            'type':           self._db_combo_type.currentData(),
+            'host':           self._db_host.text(),
+            'port':           self._db_port.value(),
+            'database':       self._db_name_field.text(),
+            'username':       self._db_user.text(),
+            'password':       self._db_pw.text(),
+            'persist_tables': self._db_chk_persist_safx.isChecked(),
+            'persist_log':    self._db_chk_persist_log.isChecked(),
+        }
+
+    def _db_save_current(self):
+        if self._db_current_idx < 0:
+            return
+        self._db_profiles[self._db_current_idx] = self._db_current_data()
+        self.cfg.save_db_profiles(self._db_profiles)
+        self.lbl_ext_db_status.setStyleSheet(
+            f"color:{_GREEN};font-size:11px;font-weight:600;")
+        self.lbl_ext_db_status.setText("✔ Perfil salvo.")
+
+    def _db_add(self):
+        p = dict(AppConfig._DEFAULT_DB_PROFILE)
+        p['name'] = f"Banco {len(self._db_profiles) + 1}"
+        self._db_profiles.append(p)
+        self._db_list.addItem(p['name'])
+        self._db_list.setCurrentRow(len(self._db_profiles) - 1)
+        self.cfg.save_db_profiles(self._db_profiles)
+
+    def _db_dup(self):
+        if self._db_current_idx < 0:
+            return
+        import copy
+        p = copy.deepcopy(self._db_profiles[self._db_current_idx])
+        p['name'] = p['name'] + " (cópia)"
+        self._db_profiles.append(p)
+        self._db_list.addItem(p['name'])
+        self._db_list.setCurrentRow(len(self._db_profiles) - 1)
+        self.cfg.save_db_profiles(self._db_profiles)
+
+    def _db_del(self):
+        if self._db_current_idx < 0:
+            return
+        name = self._db_profiles[self._db_current_idx].get('name', '')
+        r = QMessageBox.question(self, "Remover banco",
+                                 f"Remover o banco '{name}'?")
+        if r != QMessageBox.StandardButton.Yes:
+            return
+        self._db_profiles.pop(self._db_current_idx)
+        self._db_list.takeItem(self._db_current_idx)
+        self.cfg.save_db_profiles(self._db_profiles)
+        new_idx = min(self._db_current_idx, len(self._db_profiles) - 1)
+        if new_idx >= 0:
+            self._db_list.setCurrentRow(new_idx)
+        else:
+            self._db_set_form_visible(False)
 
     def _on_ext_db_toggle(self, checked: bool):
         self.cfg.set_value('ext_db', 'enabled', checked)
 
-    def _load_ext_db_settings(self):
-        cfg = self.cfg.get_section('ext_db')
-        if isinstance(cfg, dict):
-            self.edit_ext_host.setText(cfg.get('host', ''))
-            self.spin_ext_port.setValue(cfg.get('port', 5432))
-            self.edit_ext_db.setText(cfg.get('database', ''))
-            self.edit_ext_user.setText(cfg.get('username', ''))
-            db_type = cfg.get('type', 'sqlite')
-            for i in range(self.combo_ext_type.count()):
-                if self.combo_ext_type.itemData(i) == db_type:
-                    self.combo_ext_type.setCurrentIndex(i)
-                    break
-
-    def _save_ext_db_settings(self):
-        self.cfg.set_section('ext_db', {
-            'enabled': self.chk_ext_db.isChecked(),
-            'type':    self.combo_ext_type.currentData(),
-            'host':    self.edit_ext_host.text(),
-            'port':    self.spin_ext_port.value(),
-            'database': self.edit_ext_db.text(),
-            'username': self.edit_ext_user.text(),
-            'password': self.edit_ext_pw.text(),
-            'persist_tables': self.chk_persist_safx.isChecked(),
-            'persist_log':    self.chk_persist_log.isChecked(),
-        })
-        self.lbl_ext_db_status.setText("✔ Configurações salvas.")
-        self.lbl_ext_db_status.setStyleSheet(f"color:{_GREEN};font-size:11px;")
-
     def _test_ext_db(self):
         from core.external_db import ExternalDBManager
         mgr = ExternalDBManager()
-        db_type = self.combo_ext_type.currentData()
+        db_type = self._db_combo_type.currentData()
         ok, msg = mgr.connect(
             db_type,
-            host=self.edit_ext_host.text(),
-            port=self.spin_ext_port.value(),
-            dbname=self.edit_ext_db.text(),
-            user=self.edit_ext_user.text(),
-            password=self.edit_ext_pw.text(),
-            path=self.edit_ext_host.text()
+            host=self._db_host.text(),
+            port=self._db_port.value(),
+            dbname=self._db_name_field.text(),
+            user=self._db_user.text(),
+            password=self._db_pw.text(),
+            path=self._db_host.text()
         )
         mgr.disconnect()
-        color = _GREEN if ok else '#f38ba8'
+        color = _GREEN if ok else _RED
         self.lbl_ext_db_status.setText(f"{'✔' if ok else '✗'}  {msg}")
         self.lbl_ext_db_status.setStyleSheet(f"color:{color};font-size:11px;")
 

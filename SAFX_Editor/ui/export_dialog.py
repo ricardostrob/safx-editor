@@ -411,19 +411,21 @@ class ExportDialog(QDialog):
 
         cfg = AppConfig.get()
         exp_cfg = cfg.export
-        sftp_cfg = cfg.sftp
         default_dest = exp_cfg.get("default_destination", "local")
 
         local_dir_txt  = (exp_cfg.get('local_dir','') or '—')
         local_dir_disp = local_dir_txt[:28] + "…" if len(local_dir_txt) > 28 else local_dir_txt
         srv_dir_txt    = (exp_cfg.get('server_dir','') or '—')
         srv_dir_disp   = srv_dir_txt[:28] + "…" if len(srv_dir_txt) > 28 else srv_dir_txt
-        sftp_host      = sftp_cfg.get("host","") if sftp_cfg.get("enabled") else ""
+
+        # Perfis SFTP disponíveis
+        _sftp_profiles = [p for p in cfg.get_sftp_profiles() if p.get('host')]
+        sftp_lbl = f"☁  SFTP ({len(_sftp_profiles)} perfil(s))" if _sftp_profiles else "☁  SFTP (não configurado)"
 
         self.rb_local = QRadioButton("📂  Salvar (diálogo)")
         self.rb_dir   = QRadioButton(f"📁  {local_dir_disp}")
         self.rb_srv   = QRadioButton(f"🖥  {srv_dir_disp}")
-        self.rb_sftp  = QRadioButton(f"☁  {sftp_host or 'SFTP (não configurado)'}")
+        self.rb_sftp  = QRadioButton(sftp_lbl)
 
         self._dest_group = QButtonGroup(self)
         self._dest_group.addButton(self.rb_local, 0)
@@ -516,9 +518,41 @@ class ExportDialog(QDialog):
         dg_grid.addWidget(self.rb_sftp, 3, 0)
         dg_grid.addWidget(_make_gear_btn(_TAB_SFTP), 3, 1)
 
+        # Linha 4: Seletor de perfil SFTP (visível apenas quando rb_sftp ativo)
+        self._combo_sftp_profile = QComboBox()
+        self._combo_sftp_profile.setFixedHeight(26)
+        _sftp_combo_style = (
+            f"QComboBox{{background:#1e1e3a;color:#89b4fa;border:1px solid #4a4a6a;"
+            f"border-radius:4px;font-size:11px;padding:0 6px;}}"
+            f"QComboBox::drop-down{{border:none;}}"
+            f"QComboBox QAbstractItemView{{background:#1e1e2e;color:#cdd6f4;"
+            f"selection-background-color:#89b4fa;selection-color:#1e1e2e;}}")
+        self._combo_sftp_profile.setStyleSheet(_sftp_combo_style)
+
+        # Preenche com perfis SFTP configurados
+        self._sftp_profiles_list = _sftp_profiles
+        if _sftp_profiles:
+            for p in _sftp_profiles:
+                self._combo_sftp_profile.addItem(
+                    f"  {p.get('name','?')}  —  {p.get('host','')}")
+        else:
+            self._combo_sftp_profile.addItem("  Nenhum perfil SFTP configurado")
+            self._combo_sftp_profile.setEnabled(False)
+
+        self._combo_sftp_profile.setVisible(False)
+        dg_grid.addWidget(self._combo_sftp_profile, 4, 0, 1, 2)
+
+        def _on_sftp_toggled(checked):
+            self._combo_sftp_profile.setVisible(checked)
+
+        self.rb_sftp.toggled.connect(_on_sftp_toggled)
+
         for rb in _dest_rbs:
             rb.toggled.connect(_update_dst_styles)
         _update_dst_styles()
+        # Mostra combo imediatamente se SFTP já estiver selecionado
+        if self.rb_sftp.isChecked():
+            self._combo_sftp_profile.setVisible(True)
 
         config_lay.addWidget(dest_group, 1)
         top_lay.addWidget(config_container)
@@ -1221,7 +1255,14 @@ class ExportDialog(QDialog):
             path = str(Path(server_dir) / default_name)
 
         elif dest_id == 3:
-            sftp_cfg = cfg.sftp
+            # Usa o perfil SFTP selecionado no combo
+            _sftp_idx = getattr(self, '_combo_sftp_profile', None)
+            _sftp_idx = self._combo_sftp_profile.currentIndex() if _sftp_idx else 0
+            _profiles = getattr(self, '_sftp_profiles_list', [])
+            if _profiles and 0 <= _sftp_idx < len(_profiles):
+                sftp_cfg = _profiles[_sftp_idx]
+            else:
+                sftp_cfg = cfg.sftp
             if not sftp_cfg.get("host"):
                 QMessageBox.warning(self, "SFTP não configurado",
                                     "Configure em: Arquivo > Configurações > SFTP")
@@ -1254,7 +1295,6 @@ class ExportDialog(QDialog):
 
         # SFTP upload
         if dest_id == 3:
-            sftp_cfg = cfg.sftp
             from core.sftp_manager import SFTPManager
 
             progress = QProgressDialog(
