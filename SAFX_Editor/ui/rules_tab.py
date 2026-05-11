@@ -1361,36 +1361,50 @@ class RulesTab(QWidget):
 
     def _run_in_thread(self, table: str, mode: str,
                        rule=None, pkg_id: str = "", pkg_name: str = ""):
-        """Executa regra ou pacote em QThread para não congelar a UI."""
+        """Executa regra ou pacote em QThread para não congelar a UI.
+
+        IMPORTANTE: os callbacks _on_*_done são conectados com QueuedConnection
+        para garantir que rodem na thread principal (UI), não na worker thread.
+        Sem isso, chamar prog.close() ou QMessageBox de outra thread crasha o Qt.
+        """
         prog = QProgressDialog(
             "Executando regra, aguarde...", None, 0, 0, self)
         prog.setWindowTitle("Processando")
         prog.setWindowModality(Qt.WindowModality.WindowModal)
-        prog.setMinimumDuration(400)
+        prog.setMinimumDuration(300)
         prog.setValue(0)
+        # Desabilita botões durante execução para evitar execução dupla
+        self._btn_exec_rule.setEnabled(False)
+        self._btn_exec_pkg.setEnabled(False)
 
         worker = _RuleWorker(self.engine, self.db, table,
                              rule=rule, pkg_id=pkg_id)
         thread = QThread(self)
         worker.moveToThread(thread)
 
+        def _cleanup():
+            prog.close()
+            thread.quit()
+            self._btn_exec_rule.setEnabled(True)
+            self._btn_exec_pkg.setEnabled(True)
+
         if mode == "rule":
             thread.started.connect(worker.run_rule)
 
             def _on_rule_done(n: int, errors: list):
-                prog.close()
-                thread.quit()
+                _cleanup()
                 self._show_exec_result(rule.get("name", "?"), n, errors)
                 if n > 0:
                     self.dataChanged.emit()
 
-            worker.finished.connect(_on_rule_done)
+            # QueuedConnection: garante execução na thread principal (UI)
+            worker.finished.connect(
+                _on_rule_done, Qt.ConnectionType.QueuedConnection)
         else:
             thread.started.connect(worker.run_package)
 
             def _on_pkg_done(results: list):
-                prog.close()
-                thread.quit()
+                _cleanup()
                 total = sum(n for _, n, _ in results)
                 all_errors: list = []
                 lines: list = []
@@ -1407,7 +1421,8 @@ class RulesTab(QWidget):
                 if total > 0:
                     self.dataChanged.emit()
 
-            worker.pkg_finished.connect(_on_pkg_done)
+            worker.pkg_finished.connect(
+                _on_pkg_done, Qt.ConnectionType.QueuedConnection)
 
         # Limpeza ao terminar thread
         thread.finished.connect(worker.deleteLater)
