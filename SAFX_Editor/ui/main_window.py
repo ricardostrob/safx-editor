@@ -779,12 +779,19 @@ class MainWindow(QMainWindow):
         self._current_table = table_name
         layout = self.db.loaded_tables.get(table_name)
 
-        # Atualiza header
+        # Atualiza header — sempre, mesmo se layout não tiver sido encontrado
         self.lbl_active_table.setText(table_name)
-        if layout:
+        if layout is not None:
+            n_campos = len(layout.fields) if layout.fields else 0
             self.lbl_active_info.setText(
-                f"Banco: {layout.bank_table}  |  "
-                f"{len(layout.fields)} campos")
+                f"Banco: {layout.bank_table}  |  {n_campos} campos")
+        else:
+            # Fallback: conta colunas direto do banco
+            try:
+                cols = self.db.get_table_columns(table_name)
+                self.lbl_active_info.setText(f"{len(cols)} campos")
+            except Exception:
+                self.lbl_active_info.setText("")
 
         # Carrega no painel de dados
         key_fields = self._key_fields.get(table_name, [])
@@ -793,9 +800,9 @@ class MainWindow(QMainWindow):
         # Atualiza SQL panel
         self.sql_panel.update_tables(self.db.get_loaded_tables())
 
-        # Atualiza aba de regras
+        # Sincroniza aba de regras com a tabela selecionada
         if hasattr(self, 'rules_tab'):
-            self.rules_tab.refresh_tables()
+            self.rules_tab.set_active_table(table_name)
 
         # Atualiza aba de estrutura
         self._update_schema_tab(table_name)
@@ -989,8 +996,8 @@ class MainWindow(QMainWindow):
         if index == 1:  # SQL
             self.sql_panel.update_tables(self.db.get_loaded_tables())
         elif index == 3:  # Regras
-            if hasattr(self, 'rules_tab'):
-                self.rules_tab.refresh_tables()
+            if hasattr(self, 'rules_tab') and self._current_table:
+                self.rules_tab.set_active_table(self._current_table)
 
     def _on_rules_data_changed(self):
         """Chamado quando uma regra modifica dados — recarrega a grade de dados."""

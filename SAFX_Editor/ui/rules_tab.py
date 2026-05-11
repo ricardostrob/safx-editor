@@ -759,7 +759,7 @@ class RulesTab(QWidget):
     # ── Atualização da lista de tabelas ───────────────────────────────────────
 
     def refresh_tables(self):
-        """Recarrega lista de tabelas carregadas no banco."""
+        """Recarrega lista de tabelas carregadas no banco (mantém seleção atual)."""
         tables = self.db.get_loaded_tables()
         self._combo_table.blockSignals(True)
         current = self._combo_table.currentText()
@@ -767,9 +767,28 @@ class RulesTab(QWidget):
         self._combo_table.addItems(tables)
         if current in tables:
             self._combo_table.setCurrentText(current)
+        elif tables:
+            self._combo_table.setCurrentIndex(0)
         self._combo_table.blockSignals(False)
         if tables:
             self._on_table_changed(self._combo_table.currentText())
+        self._refresh_rule_list()
+
+    def set_active_table(self, table_name: str):
+        """Sincroniza o combo de tabelas com a tabela selecionada na sidebar principal."""
+        tables = self.db.get_loaded_tables()
+        self._combo_table.blockSignals(True)
+        self._combo_table.clear()
+        self._combo_table.addItems(tables)
+        if table_name in tables:
+            self._combo_table.setCurrentText(table_name)
+        elif tables:
+            self._combo_table.setCurrentIndex(0)
+        self._combo_table.blockSignals(False)
+        # Atualiza campos para a tabela selecionada
+        selected = self._combo_table.currentText()
+        if selected:
+            self._on_table_changed(selected)
         self._refresh_rule_list()
 
     def _on_table_changed(self, table: str):
